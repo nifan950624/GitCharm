@@ -30,6 +30,7 @@ import {
   type GitLogLayout,
   type GitLogLocation,
 } from '../settings/GitLogLocationSettings';
+import { openReplacingDiff, openReplacingText } from './replacingDiff';
 
 function mergeCurrentIntoBranches(branches: BranchInfo[], current: BranchInfo): BranchInfo[] {
   if (!current.detachedTag && !current.detachedHash) return branches; // normal branch — already in list
@@ -2394,11 +2395,11 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
           const fileUri = vscode.Uri.file(path.join(repo.rootPath, msg.filePath));
           // A conflicted file opens as itself, so VS Code offers its conflict resolution
           if (msg.fileStatus === '!') {
-            await vscode.commands.executeCommand('vscode.open', fileUri, { preview: true });
+            await openReplacingText(fileUri);
             break;
           }
           const [left, right] = workingTreeDiffUris(repo.rootPath, { path: msg.filePath, status: msg.fileStatus, oldPath: msg.oldPath });
-          await vscode.commands.executeCommand('vscode.diff', left, right, vscode.l10n.t('{0} (Working Tree)', path.basename(msg.filePath)), { preview: true });
+          await openReplacingDiff(left, right, vscode.l10n.t('{0} (Working Tree)', path.basename(msg.filePath)));
         } catch (e: unknown) {
           showGitError('openDiff', e);
         }
@@ -2758,5 +2759,5 @@ export async function openSmartDiff(
     }
   }
 
-  await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title, { preview: true });
+  await openReplacingDiff(leftUri, rightUri, title);
 }

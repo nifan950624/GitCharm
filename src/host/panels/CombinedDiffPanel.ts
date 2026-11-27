@@ -6,6 +6,7 @@ import type { CommitSelectionGroup } from '../types/messages';
 import { showGitError } from '../utils/gitErrorUtils';
 import { logWarn } from '../utils/Logger';
 import { plural } from '../utils/plural';
+import { openReplacingDiff } from './replacingDiff';
 
 function gitUri(rootPath: string, ref: string, filePath: string): vscode.Uri {
   const fileUri = vscode.Uri.file(path.join(rootPath, filePath));
@@ -46,7 +47,7 @@ export async function openRangeFileDiff(
     const modified = gitUri(repo.rootPath, status === 'D' ? EMPTY_TREE : head, filePath);
     const baseLabel = base === EMPTY_TREE ? '∅' : base.slice(0, 7);
     const title = `${path.basename(filePath)} (${baseLabel}…${head.slice(0, 7)})`;
-    await vscode.commands.executeCommand('vscode.diff', original, modified, title);
+    await openReplacingDiff(original, modified, title);
   } catch (e: unknown) {
     showGitError('rangeDiff', e);
   }
