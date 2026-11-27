@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { ChangelistData, FileStatus, RepoStatus } from '../../shared/types';
-import { CHANGELIST_DEFAULT_ID, CHANGELIST_UNVERSIONED_ID } from '../../shared/types';
 import type { ViewMode } from '../store/commitStore';
 import type { IconThemeData } from '../../../host/types/messages';
 import { FileTree } from './FileTree';
@@ -45,8 +44,7 @@ interface Props {
   onFolderContextMenu: (e: React.MouseEvent, repoId: string, folderPath: string, files: FileStatus[]) => void;
   onOpenFile: (file: FileStatus) => void;
   onRollback: (files: FileStatus[]) => void;
-  /** `withAi`: resolve the conflicts with the AI instead of opening the merge editor. */
-  onResolveMerge: (file: FileStatus, withAi?: boolean) => void;
+  onResolveMerge: (file: FileStatus) => void;
   onHeaderContextMenu: (e: React.MouseEvent, changelistId: string) => void;
   onRepoContextMenu: (e: React.MouseEvent, repoId: string, changelistId?: string) => void;
   onOpenChanges: (repoId: string) => void;
@@ -86,10 +84,6 @@ export function ChangelistGroup({
     }
   };
 
-  const isUnversioned = changelist.id === CHANGELIST_UNVERSIONED_ID;
-  const isDefault = changelist.id === CHANGELIST_DEFAULT_ID;
-  const headerIcon = isUnversioned ? 'question' : isDefault ? 'circle-large-outline' : 'list-unordered';
-
   return (
     <div style={styles.container}>
       <div
@@ -108,7 +102,6 @@ export function ChangelistGroup({
         />
         <div style={styles.headerMain} onClick={() => toggleCollapsed(collapseKey)}>
           <Codicon name={collapsed ? 'chevron-right' : 'chevron-down'} style={styles.chevron} />
-          <Codicon name={headerIcon} style={{ ...styles.clIcon, opacity: isUnversioned ? 0.6 : 0.8 }} />
           <span style={styles.clName}>{changelist.name}</span>
           <div style={styles.rightGroup}>
             {totalFiles > 0 && (
@@ -201,7 +194,6 @@ export function UnchangedReposGroup({ repoGroups, isCollapsed, toggleCollapsed, 
         />
         <div style={styles.headerMain} onClick={() => toggleCollapsed(key)}>
           <Codicon name={collapsed ? 'chevron-right' : 'chevron-down'} style={styles.chevron} />
-          <Codicon name="circle-slash" style={{ ...styles.clIcon, opacity: 0.6 }} />
           <span style={styles.clName}>{l10n.t({ message: 'Unchanged', comment: ['Commit panel section: repositories with no changes'] })}</span>
         </div>
       </div>
@@ -264,8 +256,7 @@ interface RepoSubGroupProps {
   onFolderContextMenu: (e: React.MouseEvent, repoId: string, folderPath: string, files: FileStatus[]) => void;
   onOpenFile: (file: FileStatus) => void;
   onRollback: (files: FileStatus[]) => void;
-  /** `withAi`: resolve the conflicts with the AI instead of opening the merge editor. */
-  onResolveMerge: (file: FileStatus, withAi?: boolean) => void;
+  onResolveMerge: (file: FileStatus) => void;
   onRepoContextMenu: (e: React.MouseEvent, repoId: string, changelistId?: string) => void;
   onOpenChanges: (repoId: string) => void;
   onBranchClick: (repoId: string) => void;
@@ -470,10 +461,6 @@ const styles = {
   chevron: {
     fontSize: '12px',
     opacity: 0.7,
-    flexShrink: 0,
-  },
-  clIcon: {
-    fontSize: '13px',
     flexShrink: 0,
   },
   clName: {

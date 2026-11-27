@@ -41,7 +41,6 @@ interface Props {
   backgroundLoading?: boolean;
   scrollTarget?: { hash: string; repoId: string } | null;
   onScrollTargetHandled?: () => void;
-  aiEnabled?: boolean;
   themeVersion?: number;
   activeProfile?: { name: string; gitName: string; gitEmail: string; builtIn?: 'local' | 'global' };
   /** Replaces the default "No commits yet" message, e.g. for an empty compare range. */
@@ -64,7 +63,7 @@ interface RepoBlock {
   rowCount: number;
 }
 
-const ALL_COLUMNS: LogColumns = { author: true, avatar: true, date: true, hash: true, refs: true };
+const ALL_COLUMNS: LogColumns = { graph: true, author: true, avatar: true, date: true, hash: true, refs: true };
 
 const REPO_LABEL_WIDTH = 6;
 const REPO_LABEL_WIDTH_EXPANDED = 110;
@@ -193,14 +192,16 @@ const DRAG_SCROLL_STEP = 8;
 /** Identifies a row across repos — the same hash can show up in several. */
 const commitKey = (c: { hash: string; repoId: string }) => `${c.hash}:${c.repoId}`;
 
-export function CommitList({ layout, selectedHash, repoColors: _repoColors, repos, branches, activeRepoId, currentBranchByRepo, headHashByRepo, onSelect, onMultiSelectionChange, onLoadMore, hasMore, storeHasMore, loading, backgroundLoading, scrollTarget, onScrollTargetHandled, aiEnabled, activeProfile, emptyState, compareSideLabels, hideDate, columns = ALL_COLUMNS, commitLimitReached }: Props) {
+export function CommitList({ layout, selectedHash, repoColors: _repoColors, repos, branches, activeRepoId, currentBranchByRepo, headHashByRepo, onSelect, onMultiSelectionChange, onLoadMore, hasMore, storeHasMore, loading, backgroundLoading, scrollTarget, onScrollTargetHandled, activeProfile, emptyState, compareSideLabels, hideDate, columns = ALL_COLUMNS, commitLimitReached }: Props) {
   const { commits, segments, refColors } = layout;
 
   // graphWidth is stable: it only grows, never shrinks, so adding new commits
-  // doesn't cause the existing rows to shift right.
+  // doesn't cause the existing rows to shift right. Hidden, the list is a flat column of messages.
+  const showGraph = columns.graph !== false;
   const graphWidthRef = useRef(0);
-  const graphWidth = Math.max(graphWidthRef.current, layout.totalCols * LANE_WIDTH + 4);
-  graphWidthRef.current = graphWidth;
+  const nextGraphWidth = Math.max(graphWidthRef.current, layout.totalCols * LANE_WIDTH + 4);
+  if (showGraph) graphWidthRef.current = nextGraphWidth;
+  const graphWidth = showGraph ? nextGraphWidth : 0;
 
   const parentRef = useRef<HTMLDivElement>(null);
   // Start as true — skeleton is always shown until commits arrive (handles first load correctly)
@@ -665,13 +666,15 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
         })}
 
         {/* Graph overlay SVG — single SVG covering the entire virtual height */}
-        <GraphOverlay
-          segments={segments}
-          visibleRows={items}
-          totalHeight={virtualizer.getTotalSize()}
-          graphWidth={graphWidth}
-          offsetX={labelColWidth}
-        />
+        {showGraph && (
+          <GraphOverlay
+            segments={segments}
+            visibleRows={items}
+            totalHeight={virtualizer.getTotalSize()}
+            graphWidth={graphWidth}
+            offsetX={labelColWidth}
+          />
+        )}
 
         {/* Commit rows (virtual) */}
         {items.map((vrow) => {
@@ -684,7 +687,9 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
           const rawTextStart = rowMaxX + LANE_WIDTH / 2 + 10;
           // Snap to the nearest LANE_WIDTH boundary so adjacent rows with near-identical
           // graph widths align rather than showing a few-pixel stagger.
-          const textStart = Math.ceil(rawTextStart / LANE_WIDTH) * LANE_WIDTH + labelColWidth;
+          const textStart = showGraph
+            ? Math.ceil(rawTextStart / LANE_WIDTH) * LANE_WIDTH + labelColWidth
+            : labelColWidth + 8;
 
           return (
             <div
@@ -800,12 +805,14 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
                 setContextMenu({ commit, x: e.clientX, y: e.clientY, multiSelected });
               }}
             >
-              <CommitDot
-                commit={commit}
-                isSelected={isSelected}
-                graphWidth={graphWidth}
-                offsetX={labelColWidth}
-              />
+              {showGraph && (
+                <CommitDot
+                  commit={commit}
+                  isSelected={isSelected}
+                  graphWidth={graphWidth}
+                  offsetX={labelColWidth}
+                />
+              )}
 
               {columns.refs && commit.refs.length > 0 && (() => {
                 const allGroups = mergeLocalRemote(groupRefs(commit.refs));
@@ -1035,6 +1042,7 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
             onPull={!isRemote ? () => post({ type: 'LOG_PULL_BRANCH_PICK', repoIds: [repoId], branchName: group.label }) : undefined}
             onPush={!isRemote ? () => post({ type: 'LOG_PUSH_BRANCH_PICK', repoIds: [repoId], branchName: group.label }) : undefined}
             onDelete={() => post({ type: 'LOG_DELETE_BRANCH_MULTI', requestId: generateId(), repoIds: [repoId], branchName: refName })}
+            onDiffWithWorkingTree={() => post({ type: 'LOG_DIFF_WITH_WORKING_TREE', label: group.label, refs: [{ repoId, ref: refName }] })}
           />
         );
       })()}
@@ -1048,7 +1056,6 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
           allCommits={commits}
           currentBranchByRepo={currentBranchByRepo}
           headHashByRepo={headHashByRepo}
-          aiEnabled={aiEnabled}
           onClose={() => setContextMenu(null)}
           onSquash={(selected) => {
             setContextMenu(null);
@@ -1323,7 +1330,7 @@ const popoverStyles = {
   } as React.CSSProperties,
 };
 
-function CommitContextMenu({ commit, x, y, multiSelected, allCommits, currentBranchByRepo, headHashByRepo, aiEnabled, onClose, onSquash }: {
+function CommitContextMenu({ commit, x, y, multiSelected, allCommits, currentBranchByRepo, headHashByRepo, onClose, onSquash }: {
   commit: LaidOutCommit;
   x: number;
   y: number;
@@ -1331,7 +1338,6 @@ function CommitContextMenu({ commit, x, y, multiSelected, allCommits, currentBra
   allCommits: LaidOutCommit[];
   currentBranchByRepo: Record<string, string>;
   headHashByRepo: Record<string, string>;
-  aiEnabled?: boolean;
   onClose: () => void;
   onSquash: (selected: LaidOutCommit[]) => void;
 }) {
@@ -1582,22 +1588,6 @@ function CommitContextMenu({ commit, x, y, multiSelected, allCommits, currentBra
           >
             <Codicon name="git-compare" style={ctxStyles.icon} />
             <span>{l10n.t('Compare with…')}</span>
-          </div>
-        )}
-        {aiEnabled && (
-          <div
-            data-ctx-item=""
-            style={ctxStyles.item}
-            onClick={() =>
-              send({
-                type: "LOG_EXPLAIN_COMMIT",
-                repoId: commit.repoId,
-                hash: commit.hash,
-              })
-            }
-          >
-            <Codicon name="sparkle" style={ctxStyles.icon} />
-            <span>{l10n.t('Explain with AI')}</span>
           </div>
         )}
         {commit.isStash ? (

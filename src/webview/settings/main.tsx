@@ -1,14 +1,12 @@
 import '../shared/l10n';
 import * as l10n from '@vscode/l10n';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Codicon } from '../shared/Codicon';
 import { useMessageBridge } from '../shared/useMessageBridge';
 import { getVsCodeApi, notifyHostReady } from '../shared/vscodeApi';
-import type { HostToSettingsMsg, IntegrationsState, McpState, SettingsState, SettingsTarget, SettingsToHostMsg } from '../../host/types/messages';
+import type { HostToSettingsMsg, IntegrationsState, SettingsState, SettingsTarget, SettingsToHostMsg } from '../../host/types/messages';
 import { IntegrationsSection, type IntegrationsActions } from './IntegrationsSection';
-import { McpSection, type McpActions } from './McpSection';
-import { AiSection, PromptsSection } from './AiSection';
 import { getCategories, settingLabel, type CategoryDef } from './layout';
 import { Preview } from './previews';
 import { GitCharmIcon } from '../shared/GitCharmIcon';
@@ -16,9 +14,6 @@ import { SettingRow, type RowContext } from './SettingRow';
 import { SETTINGS_CSS } from './styles';
 
 declare const window: Window & { __INITIAL_CONFIG__?: { section?: string } };
-
-/** Same link as package.json's `sponsor` and the README banner. */
-const SUPPORT_URL = 'https://ko-fi.com/rionoir';
 
 interface UiState { category?: string; target?: SettingsTarget; collapsed?: string[] }
 
@@ -31,7 +26,6 @@ function App() {
   const categories = useMemo(() => getCategories(), []);
   const [state, setState] = useState<SettingsState | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationsState | null>(null);
-  const [mcp, setMcp] = useState<McpState | null>(null);
   const [category, setCategory] = useState(() => window.__INITIAL_CONFIG__?.section ?? loadUiState().category ?? categories[0].id);
   const [target, setTarget] = useState<SettingsTarget>(() => loadUiState().target ?? 'user');
   const [collapsed, setCollapsed] = useState<string[]>(() => loadUiState().collapsed ?? []);
@@ -44,7 +38,6 @@ function App() {
       const msg = event.data;
       if (msg?.type === 'SETTINGS_STATE') setState(msg.state);
       else if (msg?.type === 'SETTINGS_INTEGRATIONS') setIntegrations(msg.state);
-      else if (msg?.type === 'SETTINGS_MCP') setMcp(msg.state);
       else if (msg?.type === 'SETTINGS_NAVIGATE') { setQuery(''); setCategory(msg.section); }
     };
     window.addEventListener('message', handler);
@@ -56,7 +49,6 @@ function App() {
   useEffect(() => { contentRef.current?.scrollTo({ top: 0 }); }, [category]);
   // Read lazily: the host has to look at every repository's remotes. It then keeps the page up to date.
   useEffect(() => { if (category === 'integrations') send({ type: 'SETTINGS_INTEGRATIONS_GET' }); }, [category, send]);
-  useEffect(() => { if (category === 'mcp') send({ type: 'SETTINGS_MCP_GET' }); }, [category, send]);
 
   // Without a folder open there's no workspace to write to.
   const effectiveTarget: SettingsTarget = state && !state.hasWorkspace ? 'user' : target;
@@ -107,20 +99,6 @@ function App() {
     };
   }, [state, effectiveTarget, send, categories]);
 
-  const listModels = useCallback(async (provider: string) => {
-    const r = await request<Extract<HostToSettingsMsg, { type: 'SETTINGS_MODELS' }>>({ type: 'SETTINGS_LIST_MODELS', provider } as SettingsToHostMsg, 20_000);
-    return { models: r.models, error: r.error };
-  }, [request]);
-
-  const testAi = useCallback(async () => {
-    const r = await request<Extract<HostToSettingsMsg, { type: 'SETTINGS_TEST_RESULT' }>>({ type: 'SETTINGS_TEST_AI' } as SettingsToHostMsg, 60_000);
-    return { ok: r.ok, message: r.message, elapsedMs: r.elapsedMs };
-  }, [request]);
-
-  const setApiKey = useCallback((provider: 'claude' | 'openai' | 'gemini', value: string) => {
-    send({ type: 'SETTINGS_SET_API_KEY', provider, value });
-  }, [send]);
-
   const integrationActions: IntegrationsActions = useMemo(() => ({
     add: async (integrationId, input) => {
       // Validating a token is a network call to the service: allow it more than the default timeout.
@@ -135,12 +113,6 @@ function App() {
     assign: (repoId, value) => send({ type: 'SETTINGS_INTEGRATION_ASSIGN', repoId, value }),
     openUrl: url => send({ type: 'SETTINGS_OPEN_URL', url }),
   }), [send, request]);
-
-  const mcpActions: McpActions = useMemo(() => ({
-    install: agent => send({ type: 'SETTINGS_MCP_INSTALL', agent }),
-    uninstall: agent => send({ type: 'SETTINGS_MCP_UNINSTALL', agent }),
-    openConfig: agent => send({ type: 'SETTINGS_MCP_OPEN_CONFIG', agent }),
-  }), [send]);
 
   if (!state || !ctx) {
     return <div className="gc-loading"><Codicon name="loading" className="codicon-modifier-spin" /> {l10n.t('Loading settings…')}</div>;
@@ -160,16 +132,6 @@ function App() {
   return (
     <div className="gc-settings">
       <header className="gc-header">
-        <aside className="gc-support" aria-label={l10n.t('Support GitCharm')}>
-          <Codicon name="heart" className="gc-support-icon" />
-          <div className="gc-support-text">
-            <strong>{l10n.t('GitCharm is free, and always will be.')}</strong>{' '}
-            {l10n.t('If it makes your work easier, consider supporting its development.')}
-          </div>
-          <button type="button" className="gc-btn gc-btn-primary gc-support-btn" title={SUPPORT_URL} onClick={() => send({ type: 'SETTINGS_OPEN_URL', url: SUPPORT_URL })}>
-            <Codicon name="heart-filled" /> {l10n.t('Support GitCharm')}
-          </button>
-        </aside>
         <div className="gc-search">
           <input
             ref={searchRef}
@@ -251,9 +213,9 @@ function App() {
 
         <div className="gc-content" ref={contentRef}>
           {q ? (
-            <SearchResults ctx={ctx} categories={categories} matches={matches} state={state} />
+            <SearchResults ctx={ctx} categories={categories} matches={matches} />
           ) : (
-            <CategoryPage category={current} ctx={ctx} state={state} listModels={listModels} testAi={testAi} setApiKey={setApiKey} integrations={integrations} integrationActions={integrationActions} mcp={mcp} mcpActions={mcpActions} />
+            <CategoryPage category={current} ctx={ctx} state={state} integrations={integrations} integrationActions={integrationActions} />
           )}
         </div>
       </div>
@@ -261,17 +223,12 @@ function App() {
   );
 }
 
-function CategoryPage({ category, ctx, state, listModels, testAi, setApiKey, integrations, integrationActions, mcp, mcpActions }: {
+function CategoryPage({ category, ctx, state, integrations, integrationActions }: {
   category: CategoryDef;
   ctx: RowContext;
   state: SettingsState;
-  listModels: React.ComponentProps<typeof AiSection>['listModels'];
-  testAi: React.ComponentProps<typeof AiSection>['testAi'];
-  setApiKey: React.ComponentProps<typeof AiSection>['setApiKey'];
   integrations: IntegrationsState | null;
   integrationActions: IntegrationsActions;
-  mcp: McpState | null;
-  mcpActions: McpActions;
 }) {
   return (
     <>
@@ -279,10 +236,7 @@ function CategoryPage({ category, ctx, state, listModels, testAi, setApiKey, int
       <p className="gc-group-desc">{category.description}</p>
       <div className={`gc-body${category.preview ? ' with-preview' : ''}`}>
         <div className="gc-body-main">
-          {category.custom === 'ai' && <AiSection ctx={ctx} state={state} listModels={listModels} testAi={testAi} setApiKey={setApiKey} />}
-          {category.custom === 'aiPrompts' && <PromptsSection ctx={ctx} keys={category.keys} defaults={state.defaultPrompts} />}
           {category.custom === 'integrations' && <IntegrationsSection ctx={ctx} state={integrations} actions={integrationActions} />}
-          {category.custom === 'mcp' && <McpSection ctx={ctx} state={mcp} actions={mcpActions} />}
           {!category.custom && category.keys.map(key => <SettingRow key={key} ctx={ctx} settingKey={key} />)}
         </div>
         {category.preview && (
@@ -295,7 +249,7 @@ function CategoryPage({ category, ctx, state, listModels, testAi, setApiKey, int
   );
 }
 
-function SearchResults({ ctx, categories, matches, state }: { ctx: RowContext; categories: CategoryDef[]; matches(key: string): boolean; state: SettingsState }) {
+function SearchResults({ ctx, categories, matches }: { ctx: RowContext; categories: CategoryDef[]; matches(key: string): boolean }) {
   const sections = categories.map(c => ({ c, keys: c.keys.filter(matches) })).filter(s => s.keys.length > 0);
   if (sections.length === 0) {
     return <div className="gc-empty">{l10n.t('No Settings Found')}</div>;
@@ -305,9 +259,7 @@ function SearchResults({ ctx, categories, matches, state }: { ctx: RowContext; c
       {sections.map(({ c, keys }) => (
         <section key={c.id}>
           <h3 className="gc-subgroup-title">{c.label}</h3>
-          {c.custom === 'aiPrompts'
-            ? <PromptsSection ctx={ctx} keys={keys} defaults={state.defaultPrompts} />
-            : keys.map(key => <SettingRow key={key} ctx={ctx} settingKey={key} />)}
+          {keys.map(key => <SettingRow key={key} ctx={ctx} settingKey={key} />)}
         </section>
       ))}
     </>

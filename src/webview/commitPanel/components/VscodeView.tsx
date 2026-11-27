@@ -33,8 +33,7 @@ interface Props {
   onFolderContextMenu: (e: React.MouseEvent, repoId: string, folderPath: string, files: FileStatus[], staged: boolean) => void;
   onOpenFile: (file: FileStatus) => void;
   onRollback: (files: FileStatus[]) => void;
-  /** `withAi`: resolve the conflicts with the AI instead of opening the merge editor. */
-  onResolveMerge: (file: FileStatus, withAi?: boolean) => void;
+  onResolveMerge: (file: FileStatus) => void;
   onStageFiles: (repoId: string, paths: string[]) => void;
   onUnstageFiles: (repoId: string, paths: string[]) => void;
   onStageAll: (repoId: string) => void;
@@ -102,8 +101,7 @@ interface RepoSubGroupProps {
   onFolderContextMenu: (e: React.MouseEvent, repoId: string, folderPath: string, files: FileStatus[]) => void;
   onOpenFile: (file: FileStatus) => void;
   onRollback: (files: FileStatus[]) => void;
-  /** `withAi`: resolve the conflicts with the AI instead of opening the merge editor. */
-  onResolveMerge: (file: FileStatus, withAi?: boolean) => void;
+  onResolveMerge: (file: FileStatus) => void;
   onStageFiles: (paths: string[]) => void;
   onUnstageFiles: (paths: string[]) => void;
   onRepoContextMenu: (e: React.MouseEvent) => void;
@@ -123,7 +121,6 @@ interface RepoSubGroupProps {
 }
 
 function VscodeRepoGroup({ repoStatus, repoName, repoColor, staged, files, viewMode, selectedFile, ctxFile, iconTheme, isCollapsed, toggleCollapsed, hasExpandedDirs, setDirsCollapsed, activeFolderPath, onSelectFile, onContextMenu, onFolderContextMenu, onOpenFile, onRollback, onResolveMerge, onStageFiles, onUnstageFiles, onRepoContextMenu, onBranchClick, onOpenChanges, isFirst = false, isLast = false, repoSelected, onToggleRepoSelection, singleRepo, isSubmodule, submodulePath, isWorktree, mainWorktreePath, onMultiSelect, multiSelectedFiles, headerOnly = false }: RepoSubGroupProps) {
-  const aiEnabled = useCommitStore(s => s.aiEnabled);
   const repoId = repoStatus.repoId;
   const changeSortMode = useCommitStore(s => s.viewAndSort.changeSortMode);
   const collapseKey = `vscode-repo-${staged ? 'staged' : 'unstaged'}:${repoId}`;
@@ -255,9 +252,6 @@ function VscodeRepoGroup({ repoStatus, repoName, repoColor, staged, files, viewM
               isDirContextActive={dirPath => activeFolderPath === dirPath}
               renderFileActions={(file, hovered) => file.status === 'submodule' ? null : (
                 <>
-                  {file.status === 'conflicted' && aiEnabled && (
-                    <InlineIconBtn icon="sparkle" title={l10n.t('Resolve Conflicts with AI')} visible={hovered} onClick={e => { e.stopPropagation(); onResolveMerge(file, true); }} />
-                  )}
                   {file.status === 'conflicted' && (
                     <InlineIconBtn icon="git-merge" title={l10n.t('Resolve Conflicts')} visible={hovered} onClick={e => { e.stopPropagation(); onResolveMerge(file); }} />
                   )}
@@ -296,7 +290,6 @@ function VscodeRepoGroup({ repoStatus, repoName, repoColor, staged, files, viewM
 
 interface SectionHeaderProps {
   title: string;
-  icon: string;
   /** Omitted for a section with nothing to count (e.g. "Unchanged"). */
   count?: number;
   collapsed: boolean;
@@ -315,7 +308,7 @@ interface SectionHeaderProps {
   topBorder?: boolean;
 }
 
-function SectionHeader({ title, icon, count, collapsed, onToggle, onContextMenu, actionIcon, actionTitle, onAction, secondActionIcon, secondActionTitle, onSecondAction, openChangesIcon, openChangesTitle, onOpenChanges, topBorder }: SectionHeaderProps) {
+function SectionHeader({ title, count, collapsed, onToggle, onContextMenu, actionIcon, actionTitle, onAction, secondActionIcon, secondActionTitle, onSecondAction, openChangesIcon, openChangesTitle, onOpenChanges, topBorder }: SectionHeaderProps) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -326,7 +319,6 @@ function SectionHeader({ title, icon, count, collapsed, onToggle, onContextMenu,
     >
       <div style={sectionHeaderMainStyle} onClick={onToggle}>
         <Codicon name={collapsed ? 'chevron-right' : 'chevron-down'} style={{ fontSize: '12px', opacity: 0.7, flexShrink: 0 }} />
-        <Codicon name={icon} style={{ fontSize: '13px', opacity: 0.8, flexShrink: 0 }} />
         <span style={sectionTitleStyle}>{title}</span>
       </div>
       {/* Right side always rendered to avoid layout shift */}
@@ -420,7 +412,6 @@ export function VscodeView({
       {/* ── Staged Changes ── */}
       <SectionHeader
         title={l10n.t('Staged Changes')}
-        icon="git-commit"
         count={totalStaged}
         collapsed={stagedCollapsed}
         onToggle={() => toggleCollapsed(STAGED_COLLAPSE_KEY)}
@@ -482,7 +473,6 @@ export function VscodeView({
       {/* ── Changes ── */}
       <SectionHeader
         title={l10n.t('Changes')}
-        icon="circle-large-outline"
         count={totalUnstaged}
         collapsed={unstagedCollapsed}
         onToggle={() => toggleCollapsed(UNSTAGED_COLLAPSE_KEY)}
@@ -547,7 +537,6 @@ export function VscodeView({
       {unchangedRepos.length > 0 && (
         <SectionHeader
           title={l10n.t({ message: 'Unchanged', comment: ['Commit panel section: repositories with no changes'] })}
-          icon="circle-slash"
           collapsed={unchanged.collapsed}
           onToggle={() => toggleCollapsed(unchanged.key)}
           onContextMenu={_e => {/* no-op */}}

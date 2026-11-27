@@ -17,6 +17,7 @@ import { EmptyTabState } from './components/EmptyTabState';
 import { StashTab } from './components/StashTab';
 import { PushTab } from './components/PushTab';
 import { WorktreePanel } from './components/WorktreePanel';
+import { WorkingTreeBranchDiff, type WorkingTreeDiffGroup } from '../gitLog/components/WorkingTreeBranchDiff';
 import { PullRequestPanel, NoRemoteState, noRepoHasRemote } from './components/PullRequestPanel';
 import { IssuePanel, IssuesNoRemoteState, noIssueRepoHasRemote } from './components/IssuePanel';
 import { getVsCodeApi } from '../shared/vscodeApi';
@@ -78,9 +79,8 @@ const FILE_CONTEXT_ITEMS = (): ContextMenuEntry[] => [
   { id: 'refresh',         label: l10n.t('Refresh'),             icon: 'refresh' },
 ];
 
-const FILE_CONTEXT_ITEMS_CONFLICT = (aiEnabled: boolean): ContextMenuEntry[] => [
+const FILE_CONTEXT_ITEMS_CONFLICT = (): ContextMenuEntry[] => [
   { id: 'resolve',   label: l10n.t('Resolve Conflicts'),  icon: 'git-merge' },
-  ...(aiEnabled ? [{ id: 'resolveAi', label: l10n.t('Resolve Conflicts with AI'), icon: 'sparkle' }] : []),
   { separator: true },
   ...FILE_CONTEXT_ITEMS(),
 ];
@@ -256,7 +256,7 @@ const CHANGELIST_HEADER_ITEMS_CUSTOM = (): ContextMenuEntry[] => [
   { id: 'refresh',     label: l10n.t('Refresh'),           icon: 'refresh' },
 ];
 
-type TabId = 'changes' | 'shelf' | 'stash' | 'push' | 'worktree' | 'pullrequests' | 'issues';
+type TabId = 'changes' | 'shelf' | 'stash' | 'push' | 'worktree' | 'pullrequests' | 'issues' | 'branchdiff';
 
 function App() {
   const store = useCommitStore();
@@ -264,16 +264,19 @@ function App() {
 
   // ── Tab ───────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<TabId>('changes');
+  const [branchDiff, setBranchDiff] = useState<{ label: string; groups: WorkingTreeDiffGroup[] } | null>(null);
   // The gitcharm.commitPanel.* settings: which tabs, in which order, labels and badges. Null until the host sends them.
   const [panelConfig, setPanelConfig] = useState<CommitPanelConfig | null>(null);
   // Read from the message handler, registered once.
   const keepCommitMessageRef = useRef(false);
   keepCommitMessageRef.current = !!panelConfig?.keepCommitMessage;
-  const shownTabs: TabId[] = panelConfig?.tabs ?? ['changes', 'shelf', 'stash', 'worktree', 'issues', 'pullrequests', 'push'];
-  // A tab turned off while open hands over to Changes.
+  const baseTabs: TabId[] = panelConfig?.tabs ?? ['changes', 'shelf', 'stash', 'worktree', 'issues', 'pullrequests', 'push'];
+  const shownTabs: TabId[] = branchDiff ? [...baseTabs, 'branchdiff'] : baseTabs;
+  const shownKey = shownTabs.join(',');
+  // A tab turned off while open, or the Diff tab once its comparison is closed, hands over to Changes.
   useEffect(() => {
-    if (!shownTabs.includes(activeTab)) setActiveTab('changes');
-  }, [activeTab, panelConfig]);
+    if (!shownKey.split(',').includes(activeTab)) setActiveTab('changes');
+  }, [activeTab, shownKey]);
   const [tabBarWidths, setTabBarWidths] = useState<TabBarWidths<TabId> | null>(null);
   // `dropdown`: the collapsed bar's menu, as wide as its button; `overflow`: the tabs left out of a partial strip.
   const [tabMenu, setTabMenu] = useState<{ kind: 'dropdown' | 'overflow'; x: number; y: number; width?: number } | null>(null);
@@ -479,11 +482,6 @@ function App() {
   const shownTabsKey = shownTabs.join(',');
   useLayoutEffect(() => { measureTabBarRef.current(); }, [shownTabsKey]);
 
-  // ── Autopilot ─────────────────────────────────────────────────────────────
-  const [generatingMessage, setGeneratingMessage]   = useState(false);
-  // What the message was before AI generation started streaming into it — put back if generation fails midway.
-  const messageBeforeGenerate = useRef<string | null>(null);
-
   // ── Selected file (highlighted when diff is open or on right-click) ──────
   const [selectedFile, setSelectedFile] = useState<FileStatus | null>(null);
 
@@ -542,7 +540,7 @@ function App() {
           });
           break;
         case 'COMMIT_STATUS_UPDATE':
-          store.setStatus(msg.repos, msg.status, msg.iconTheme, msg.defaultCommitAction, msg.defaultSaveAction, msg.hasWorkspaceFolder, msg.aiEnabled, msg.activeProfile);
+          store.setStatus(msg.repos, msg.status, msg.iconTheme, msg.defaultCommitAction, msg.defaultSaveAction, msg.hasWorkspaceFolder, msg.activeProfile);
           if (msg.panelConfig) setPanelConfig(msg.panelConfig);
           if (Array.isArray(msg.status.repos) && useCommitStore.getState().changesViewMode === 'vscode') {
             const prevCounts = prevUnstagedCountsRef.current;
@@ -588,19 +586,6 @@ function App() {
           } else if (msg.error && msg.error !== 'Cancelled') {
             notifyError(msg.error);
           }
-          break;
-        case 'COMMIT_GENERATE_MESSAGE_PROGRESS':
-          if (msg.message) store.setCommitMessage(msg.message);
-          break;
-        case 'COMMIT_GENERATE_MESSAGE_RESULT':
-          setGeneratingMessage(false);
-          if (msg.message) {
-            store.setCommitMessage(msg.message);
-          } else {
-            if (messageBeforeGenerate.current !== null) store.setCommitMessage(messageBeforeGenerate.current);
-            if (msg.error && msg.error !== 'Cancelled') notifyError(msg.error);
-          }
-          messageBeforeGenerate.current = null;
           break;
         case 'COMMIT_LAST_COMMIT_MESSAGE_RESULT':
           if (msg.message && !useCommitStore.getState().commitMessage.trim()) {
@@ -792,6 +777,19 @@ function App() {
           if (msg.tab === 'push') repos.forEach(r => requestUnpushedCommits(r.repoId));
           if (msg.tab === 'pullrequests') requestPullRequestList();
           if (msg.tab === 'issues') requestIssueList();
+          break;
+
+        case 'COMMIT_BRANCH_DIFF':
+          setBranchDiff({ label: msg.label, groups: msg.groups });
+          if (msg.focus !== false) setActiveTab('branchdiff');
+          break;
+
+        case 'COMMIT_BRANCH_DIFF_FILES':
+          setBranchDiff(prev => prev ? { ...prev, groups: msg.groups } : prev);
+          break;
+
+        case 'COMMIT_BRANCH_DIFF_CLEAR':
+          setBranchDiff(null);
           break;
 
         case 'COMMIT_DESELECT_FILE':
@@ -1064,7 +1062,7 @@ function App() {
     if (panelConfig?.badges.issues && panelConfig.tabs.includes('issues') && !issueListRequestedRef.current) requestIssueList();
   }, [panelConfig]);
   useEffect(() => {
-    if (initialTabAppliedRef.current) send({ type: 'COMMIT_ACTIVE_TAB', tab: activeTab });
+    if (initialTabAppliedRef.current && activeTab !== 'branchdiff') send({ type: 'COMMIT_ACTIVE_TAB', tab: activeTab });
   }, [activeTab]);
 
   // The Shelf and Stash badges (off by default) need every repo's list even with the tab closed. Shelves and stashes
@@ -1149,9 +1147,6 @@ function App() {
         break;
       case 'resolve':
         send({ type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: file.repoId, filePath: file.path });
-        break;
-      case 'resolveAi':
-        send({ type: 'COMMIT_RESOLVE_CONFLICTS_AI', repoId: file.repoId, filePath: file.path });
         break;
       case 'rollback':
         send({ type: 'COMMIT_DISCARD_FILE', requestId: generateId(), repoId: file.repoId, path: file.path });
@@ -1366,10 +1361,6 @@ function App() {
     send({ type: 'PUSH_OPEN_COMMIT_CHANGES', repoId, hash } satisfies CommitToHostMsg);
   };
 
-  const doPushExplainCommit = (repoId: string, hash: string) => {
-    send({ type: 'PUSH_EXPLAIN_COMMIT', repoId, hash } satisfies CommitToHostMsg);
-  };
-
   const doPushViewCombinedDiff = (repoId: string, hashes: string[]) => {
     send({ type: 'PUSH_VIEW_COMBINED_DIFF', repoId, hashes } satisfies CommitToHostMsg);
   };
@@ -1421,30 +1412,6 @@ function App() {
         break;
     }
   };
-
-  // ── Autopilot ─────────────────────────────────────────────────────────────
-
-  const doAutopilot = useCallback(() => {
-    if (generatingMessage) return;
-    // Same files doCommit would commit: staged ones in vscode mode, the selected ones otherwise
-    const freshState = useCommitStore.getState();
-    const currentRepos = freshState.status?.repos ?? [];
-    const repos = freshState.changesViewMode === 'vscode'
-      ? currentRepos
-          .filter(r => vscodeSelectedRepos.has(r.repoId))
-          .map(r => ({ repoId: r.repoId, paths: r.stagedFiles.map(f => f.path), stagedOnly: true }))
-      : currentRepos
-          .filter(r => freshState.repoSelections[r.repoId] !== false)
-          .map(r => ({ repoId: r.repoId, paths: freshState.getSelectedFilesForRepo(r.repoId), stagedOnly: false }));
-    setGeneratingMessage(true);
-    messageBeforeGenerate.current = freshState.commitMessage;
-    send({ type: 'COMMIT_GENERATE_MESSAGE', requestId: generateId(), repos: repos.filter(r => r.paths.length > 0) });
-  }, [generatingMessage, send, vscodeSelectedRepos]);
-
-  const doAutopilotContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    send({ type: 'COMMIT_SELECT_AI_MODEL' });
-  }, [send]);
 
   // ── Loading / empty states ────────────────────────────────────────────────
 
@@ -1599,13 +1566,22 @@ function App() {
         const changesLabel = (store.changesViewMode === 'changelists' || store.changesViewMode === 'vscode')
           ? l10n.t({ message: 'Commit', comment: ['Tab title: the tab with the commit form and changed files'] })
           : l10n.t({ message: 'Changes', comment: ['Tab title: list of changed files'] });
-        const tabMeta = (tab: TabId) => ({
-          label: tab === 'changes' ? changesLabel : tab === 'shelf' ? l10n.t('Shelf') : tab === 'stash' ? l10n.t({ message: 'Stash', comment: ['Tab title: list of git stashes'] }) : tab === 'worktree' ? l10n.t('Worktrees') : tab === 'pullrequests' ? l10n.t('Pull Requests') : tab === 'issues' ? l10n.t('Issues') : l10n.t({ message: 'Sync', comment: ['Tab title: remote operations — commits to push and to pull'] }),
-          iconName: tab === 'changes' ? 'git-branch-changes' : tab === 'shelf' ? 'archive' : tab === 'stash' ? 'git-stash' : tab === 'worktree' ? 'worktree' : tab === 'pullrequests' ? 'git-pull-request' : tab === 'issues' ? 'issues' : 'cloud',
-          badge: !(panelConfig ? panelConfig.badges[tab] : tab === 'changes' || tab === 'push' || tab === 'pullrequests' || tab === 'issues') ? 0
-            : tab === 'changes' ? totalChanges : tab === 'push' ? totalOutOfSync : tab === 'pullrequests' ? totalPullRequests : tab === 'issues' ? totalIssues
-            : tab === 'shelf' ? totalShelves : tab === 'stash' ? totalStashes : tab === 'worktree' ? totalWorktrees : 0,
-        });
+        const tabMeta = (tab: TabId) => {
+          if (tab === 'branchdiff') {
+            return {
+              label: l10n.t({ message: 'Diff', comment: ['Tab title: files that differ between a branch and the working tree'] }),
+              iconName: 'git-compare',
+              badge: branchDiff?.groups.reduce((sum, group) => sum + group.files.length, 0) ?? 0,
+            };
+          }
+          return {
+            label: tab === 'changes' ? changesLabel : tab === 'shelf' ? l10n.t('Shelf') : tab === 'stash' ? l10n.t({ message: 'Stash', comment: ['Tab title: list of git stashes'] }) : tab === 'worktree' ? l10n.t('Worktrees') : tab === 'pullrequests' ? l10n.t('Pull Requests') : tab === 'issues' ? l10n.t('Issues') : l10n.t({ message: 'Sync', comment: ['Tab title: remote operations — commits to push and to pull'] }),
+            iconName: tab === 'changes' ? 'git-branch-changes' : tab === 'shelf' ? 'archive' : tab === 'stash' ? 'git-stash' : tab === 'worktree' ? 'worktree' : tab === 'pullrequests' ? 'git-pull-request' : tab === 'issues' ? 'issues' : 'cloud',
+            badge: !(panelConfig ? panelConfig.badges[tab] : tab === 'changes' || tab === 'push' || tab === 'pullrequests' || tab === 'issues') ? 0
+              : tab === 'changes' ? totalChanges : tab === 'push' ? totalOutOfSync : tab === 'pullrequests' ? totalPullRequests : tab === 'issues' ? totalIssues
+              : tab === 'shelf' ? totalShelves : tab === 'stash' ? totalStashes : tab === 'worktree' ? totalWorktrees : 0,
+          };
+        };
         const selectTab = (tab: TabId) => {
           setActiveTab(tab);
           // Skip refetching data that's already loaded — avoids a jarring loading flash every time the
@@ -1813,7 +1789,7 @@ function App() {
                     send({ type: 'COMMIT_DISCARD_FILES', requestId: generateId(), files: files.map(f => ({ repoId: f.repoId, path: f.path })) });
                   }
                 }}
-                onResolveMerge={(f, withAi) => send(withAi ? { type: 'COMMIT_RESOLVE_CONFLICTS_AI', repoId: f.repoId, filePath: f.path } : { type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: f.repoId, filePath: f.path })}
+                onResolveMerge={f => send({ type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: f.repoId, filePath: f.path })}
                 onStageFiles={(rid, paths) => send({ type: 'COMMIT_STAGE_FILES', requestId: generateId(), repoId: rid, paths })}
                 onUnstageFiles={(rid, paths) => send({ type: 'COMMIT_UNSTAGE_FILES', requestId: generateId(), repoId: rid, paths })}
                 onStageAll={rid => send({ type: 'COMMIT_STAGE_ALL', requestId: generateId(), repoId: rid })}
@@ -1872,7 +1848,7 @@ function App() {
                     send({ type: 'COMMIT_DISCARD_FILES', requestId: generateId(), files: files.map(f => ({ repoId: f.repoId, path: f.path })) });
                   }
                 }}
-                onResolveMerge={(f, withAi) => send(withAi ? { type: 'COMMIT_RESOLVE_CONFLICTS_AI', repoId: f.repoId, filePath: f.path } : { type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: f.repoId, filePath: f.path })}
+                onResolveMerge={f => send({ type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: f.repoId, filePath: f.path })}
                 onHeaderContextMenu={(e, clId) => setClHeaderCtxMenu({ x: e.clientX, y: e.clientY, changelistId: clId })}
                 onRepoContextMenu={(e, rid, clId) => setRepoCtxMenu({ x: e.clientX, y: e.clientY, repoId: rid, changelistId: clId })}
                 onOpenChanges={rid => send({ type: 'COMMIT_OPEN_ALL_CHANGES', repoId: rid } satisfies CommitToHostMsg)}
@@ -1963,7 +1939,7 @@ function App() {
                           send({ type: 'COMMIT_DISCARD_FILES', requestId: generateId(), files: files.map(f => ({ repoId: f.repoId, path: f.path })) });
                         }
                       }}
-                      onResolveMerge={(f, withAi) => send(withAi ? { type: 'COMMIT_RESOLVE_CONFLICTS_AI', repoId: f.repoId, filePath: f.path } : { type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: f.repoId, filePath: f.path })}
+                      onResolveMerge={f => send({ type: 'COMMIT_OPEN_MERGE_EDITOR', repoId: f.repoId, filePath: f.path })}
                       onBranchClick={rid => send({ type: 'COMMIT_SHOW_BRANCH_MENU', repoId: rid })}
                       onRepoContextMenu={(e, rid) => setRepoCtxMenu({ x: e.clientX, y: e.clientY, repoId: rid })}
                       onOpenAllChanges={rid => send({ type: 'COMMIT_OPEN_ALL_CHANGES', repoId: rid } satisfies CommitToHostMsg)}
@@ -2052,10 +2028,6 @@ function App() {
             onPullRepos={ids => ids.forEach(id => doPull(id, false))}
             onPushRepos={ids => ids.forEach(doPush)}
             onForcePushRepos={ids => ids.forEach(doForcePush)}
-            aiEnabled={store.aiEnabled}
-            onAutopilot={doAutopilot}
-            onAutopilotContextMenu={doAutopilotContextMenu}
-            generatingMessage={generatingMessage}
             activeProfile={store.activeProfile}
             onOpenProfiles={() => send({ type: 'OPEN_PROFILES_MENU' } satisfies CommitToHostMsg)}
             onRebaseAction={(repoId, action) => {
@@ -2194,12 +2166,63 @@ function App() {
               onEditCommitMsg={doEditCommitMsg}
               onOpenDetail={doPushOpenDetail}
               onOpenChanges={doPushOpenChanges}
-              onExplainCommit={doPushExplainCommit}
               onViewCombinedDiff={doPushViewCombinedDiff}
               onBranchClick={rid => send({ type: 'COMMIT_SHOW_BRANCH_MENU', repoId: rid })}
-              aiEnabled={store.aiEnabled}
             />
           </div>
+        )}
+
+        {activeTab === 'branchdiff' && branchDiff && (
+          <WorkingTreeBranchDiff
+            label={branchDiff.label}
+            groups={branchDiff.groups}
+            repos={store.repoMetas.map(repo => ({ id: repo.id, name: repo.name }))}
+            iconTheme={store.iconTheme}
+            onShowDiff={file => send({
+              type: 'COMMIT_BRANCH_DIFF_SHOW',
+              repoId: file.repoId,
+              ref: file.ref,
+              filePath: file.path,
+              status: file.status,
+              oldPath: file.oldPath,
+            })}
+            onShowDirDiff={(dirPath, files) => {
+              const first = files[0];
+              if (!first) return;
+              send({
+                type: 'COMMIT_BRANCH_DIFF_SHOW_DIR',
+                repoId: first.repoId,
+                ref: first.ref,
+                dirPath,
+                files: files.map(file => ({ path: file.path, status: file.status, oldPath: file.oldPath })),
+              });
+            }}
+            onGetFromBranch={file => send({
+              type: 'COMMIT_BRANCH_DIFF_GET',
+              repoId: file.repoId,
+              ref: file.ref,
+              filePath: file.path,
+              status: file.status,
+              oldPath: file.oldPath,
+            })}
+            onGetDirFromBranch={(dirPath, files) => {
+              const first = files[0];
+              if (!first) return;
+              send({
+                type: 'COMMIT_BRANCH_DIFF_GET_DIR',
+                repoId: first.repoId,
+                ref: first.ref,
+                dirPath,
+                files: files.map(file => ({ path: file.path, status: file.status, oldPath: file.oldPath })),
+              });
+            }}
+            onRefresh={() => send({ type: 'COMMIT_BRANCH_DIFF_REFRESH' })}
+            onClose={() => {
+              setBranchDiff(null);
+              setActiveTab('changes');
+              send({ type: 'COMMIT_BRANCH_DIFF_CLOSE' });
+            }}
+          />
         )}
 
         {activeTab === 'worktree' && (
@@ -2297,7 +2320,7 @@ function App() {
         const isUntracked = file.status === 'untracked';
         const isSubmodule = file.status === 'submodule';
         const hasCustomCls = store.changelists.some(cl => cl.id !== CHANGELIST_DEFAULT_ID && cl.id !== CHANGELIST_UNVERSIONED_ID);
-        const baseItems = file.status === 'conflicted' ? FILE_CONTEXT_ITEMS_CONFLICT(store.aiEnabled) : FILE_CONTEXT_ITEMS();
+        const baseItems = file.status === 'conflicted' ? FILE_CONTEXT_ITEMS_CONFLICT() : FILE_CONTEXT_ITEMS();
         let items: ContextMenuEntry[] = baseItems;
         if (isSubmodule) {
           items = ctxMenuStaged ? SUBMODULE_FILE_STAGED_ITEMS() : SUBMODULE_FILE_UNSTAGED_ITEMS();

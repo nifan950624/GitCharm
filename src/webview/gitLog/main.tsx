@@ -55,7 +55,7 @@ function App() {
   const { panelRef: detailRef, onMouseDown: onDetailResize } = useResize('left', 380, 200);
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [layoutByLocation, setLayoutByLocation] = useState(initialLayout);
-  const [columns, setColumns] = useState<LogColumns>({ author: true, avatar: true, date: true, hash: true, refs: true });
+  const [columns, setColumns] = useState<LogColumns>({ graph: true, author: true, avatar: true, date: true, hash: true, refs: true });
   const [viewLocation, setViewLocation] = useState(detectViewLocation);
   const { filtersHidden, sidebarHidden } = layoutByLocation[viewLocation];
   const [themeVersion, setThemeVersion] = useState(0);
@@ -162,7 +162,7 @@ function App() {
 
       switch (msg.type) {
         case 'LOG_INIT_DATA':
-          store.setRepos(msg.repos, msg.hasWorkspaceFolder, msg.aiEnabled, msg.activeProfile);
+          store.setRepos(msg.repos, msg.hasWorkspaceFolder, msg.activeProfile);
           store.setBranches(msg.branches);
           if (msg.iconTheme) store.setIconTheme(msg.iconTheme);
           if (msg.layout) setLayoutByLocation(msg.layout);
@@ -677,6 +677,9 @@ function App() {
           onPushTag={(repoId, tagName) => {
             getVsCodeApi().postMessage({ type: 'LOG_PUSH_TAG_PICK', repoId, tagName } satisfies LogToHostMsg);
           }}
+          onDiffWithWorkingTree={(refs, label) => {
+            getVsCodeApi().postMessage({ type: 'LOG_DIFF_WITH_WORKING_TREE', label, refs } satisfies LogToHostMsg);
+          }}
           onDeleteTag={(repoIds, tagName) => {
             getVsCodeApi().postMessage({ type: 'LOG_DELETE_TAG_MULTI', requestId: generateId(), repoIds, tagName } satisfies LogToHostMsg);
           }}
@@ -713,7 +716,6 @@ function App() {
             backgroundLoading={store.backgroundLoading}
             scrollTarget={store.pendingScrollTarget}
             onScrollTargetHandled={() => store.setPendingScrollTarget(null)}
-            aiEnabled={store.aiEnabled}
             themeVersion={themeVersion}
             activeProfile={store.activeProfile}
             emptyState={compareEmptyState}
@@ -726,7 +728,7 @@ function App() {
 
         {hasSelectedCommit && !detailCollapsed && <ResizeHandle onMouseDown={onDetailResize} />}
 
-        {/* Commit detail (right) — hidden when no commit selected or closed */}
+        {/* Commit detail (right) */}
         {hasSelectedCommit && !detailCollapsed && (
           <div ref={detailRef} style={detailPane}>
             <CommitDetail

@@ -129,12 +129,12 @@ function RepoRow({ repo, check, count, collapsed, indent = 0, badge, className }
 }
 
 /** Section row of the Changelists / VS Code views: CHANGES, a changelist, UNVERSIONED FILES, STAGED CHANGES… */
-function GroupRow({ label, icon, check, count, accent }: { label: string; icon: string; check?: Check; count: string; accent?: boolean }) {
+function GroupRow({ label, icon, check, count, accent }: { label: string; icon?: string; check?: Check; count: string; accent?: boolean }) {
   return (
     <div className={`pv-group${accent ? ' accent' : ''}`}>
       {check && <Cb state={check} />}
       <Codicon name="chevron-down" style={{ fontSize: 11 }} />
-      <Codicon name={icon} style={{ fontSize: 11 }} />
+      {icon && <Codicon name={icon} style={{ fontSize: 11 }} />}
       <span className="pv-grow">{label}</span>
       <span className="pv-count">{count}</span>
     </div>
@@ -241,7 +241,7 @@ function ChangesViewPreview({ get, repos }: PreviewProps) {
         )}
         {mode === 'changelists' && (
           <>
-            <GroupRow label="CHANGES" icon="diff-multiple" check="some" count="3/5" />
+            <GroupRow label="CHANGES" check="some" count="3/5" />
             <RepoRow repo={front} check="on" count="3/3" indent={1} />
             <FileRow name=".gitignore" kind="git" status="M" check="on" indent={2} />
             <FileRow name="components.json" kind="json" status="M" check="on" indent={2} />
@@ -270,7 +270,7 @@ function ChangesViewPreview({ get, repos }: PreviewProps) {
             )}
             {!backPicked && (
               <>
-                <GroupRow label="CHANGES" icon="diff-multiple" count="1" />
+                <GroupRow label="CHANGES" count="1" />
                 <RepoRow repo={back} count="1" />
                 <FileRow name="file.json" kind="json" status="U" className={hot} />
               </>
@@ -292,7 +292,6 @@ function ChangesViewPreview({ get, repos }: PreviewProps) {
           ) : (
             <span className="pv-muted">{l10n.t('Commit message ({0} to commit)', shortcut(['mod'], 'Enter'))}</span>
           )}
-          <Codicon name="sparkle" style={{ fontSize: 11, marginLeft: 'auto', opacity: 0.7 }} />
         </div>
         <div className="pv-buttons">
           <span className="pv-btn"><Codicon name={shelve ? 'archive' : 'git-stash'} style={{ fontSize: 11 }} />{shelve ? 'Shelve' : 'Stash'}<span className="pv-btn-split"><Codicon name="chevron-down" style={{ fontSize: 10 }} /></span></span>
@@ -316,22 +315,24 @@ const GRAPH_ROWS = [
   { msg: 'Bump dependencies', author: 'Jo Chen', hash: '7a8b9c0', when: '3d', lane: 0 },
 ];
 
-interface LogColumns { author: boolean; avatar: boolean; date: boolean; hash: boolean; refs: boolean }
+interface LogColumns { graph: boolean; author: boolean; avatar: boolean; date: boolean; hash: boolean; refs: boolean }
 
 function MiniGraph({ uncommitted, color, compact, selected, columns }: { uncommitted: boolean; color: string; compact?: boolean; selected: number; columns: LogColumns }) {
   return (
     <div className="pv-graph">
       {uncommitted && (
         <div className="pv-graph-row">
-          <span className="pv-lane"><span className="pv-node hollow" style={{ borderColor: color }} /></span>
+          {columns.graph && <span className="pv-lane"><span className="pv-node hollow" style={{ borderColor: color }} /></span>}
           <span className="pv-grow pv-italic">{l10n.t('Uncommitted changes')}</span>
         </div>
       )}
       {GRAPH_ROWS.slice(0, compact ? 3 : 5).map((r, i) => (
         <div key={i} className={`pv-graph-row${i === selected ? ' selected' : ''}`}>
-          <span className="pv-lane">
-            <span className="pv-node" style={{ background: r.lane ? '#ffb74d' : color, marginLeft: r.lane * 10 }} />
-          </span>
+          {columns.graph && (
+            <span className="pv-lane">
+              <span className="pv-node" style={{ background: r.lane ? '#ffb74d' : color, marginLeft: r.lane * 10 }} />
+            </span>
+          )}
           {columns.refs && r.ref && (
             <span className="pv-repo-pill" style={{ color: r.lane ? '#ffb74d' : color, borderColor: r.lane ? '#ffb74d' : color }}>{r.ref}</span>
           )}
@@ -354,6 +355,7 @@ function GitLogPreview({ get }: PreviewProps) {
   const uncommitted = get<boolean>('showUncommittedChangesInLog');
   const max = get<number>('graphMaxCommits');
   const columns: LogColumns = {
+    graph: get<boolean>('gitLog.showGraph') !== false,
     author: get<boolean>('gitLog.showAuthor'),
     avatar: get<boolean>('gitLog.showAuthorAvatar'),
     date: get<boolean>('gitLog.showDate'),

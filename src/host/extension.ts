@@ -19,7 +19,6 @@ import { PullRequestManager } from './pullRequests/PullRequestManager';
 import { IntegrationAccountStore } from './integrations/IntegrationAccountStore';
 import { IntegrationsService } from './integrations/IntegrationsService';
 import { SettingsPanel } from './panels/SettingsPanel';
-import { registerConflictAiCommands } from './commands/conflictAiCommands';
 import { registerInteractiveRebase } from './commands/interactiveRebaseCommands';
 import { CreatePullRequestPanel } from './panels/CreatePullRequestPanel';
 import { PullRequestDetailPanel } from './panels/PullRequestDetailPanel';
@@ -27,12 +26,8 @@ import { PullRequestDocumentProvider } from './pullRequests/PullRequestDocumentP
 import { IssueManager } from './issues/IssueManager';
 import { IssueDetailPanel } from './panels/IssueDetailPanel';
 import { CreateIssuePanel } from './panels/CreateIssuePanel';
-import { IssueResolvePanel } from './panels/IssueResolvePanel';
 import { deserializeCommitFullDetailPanel } from './panels/CommitFullDetailPanel';
 import { avatarResolver } from './utils/avatarResolver';
-import { initAiSecrets } from './ai/aiSecrets';
-import { McpService } from './mcp/McpService';
-
 /**
  * Before avatars and Gravatar were two settings, `avatars.enabled` (off by default) meant Gravatar, and users were
  * asked once whether to turn it on. Their answer carries over, once: those who turned it on keep Gravatar; those
@@ -98,37 +93,6 @@ async function showViewModeQuickpick(globalState: vscode.Memento): Promise<void>
 
   if (picked) {
     await vscode.workspace.getConfiguration('gitcharm').update('changesViewMode', picked.value, vscode.ConfigurationTarget.Global);
-  }
-}
-
-async function maybeShowSupportNotification(globalState: vscode.Memento): Promise<void> {
-  const DO_NOT_SHOW_KEY = 'doNotShowSupportNotification';
-  const LAST_SHOWN_KEY = 'supportNotificationLastShown';
-
-  if (globalState.get<boolean>(DO_NOT_SHOW_KEY)) return;
-
-  const lastShown = globalState.get<number>(LAST_SHOWN_KEY, 0);
-  const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-  if (Date.now() - lastShown < oneMonthMs) return;
-
-  await globalState.update(LAST_SHOWN_KEY, Date.now());
-
-  const star = vscode.l10n.t('Leave a Star');
-  const support = vscode.l10n.t('Support');
-  const doNotShow = vscode.l10n.t('Do Not Show Again');
-  const picked = await vscode.window.showInformationMessage(
-    vscode.l10n.t('Do you like GitCharm?'),
-    star,
-    support,
-    doNotShow,
-  );
-
-  if (picked === doNotShow) {
-    await globalState.update(DO_NOT_SHOW_KEY, true);
-  } else if (picked === star) {
-    await vscode.env.openExternal(vscode.Uri.parse('https://github.com/RioNoir/GitCharm'));
-  } else if (picked === support) {
-    await vscode.env.openExternal(vscode.Uri.parse('https://ko-fi.com/rionoir'));
   }
 }
 
@@ -279,9 +243,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // DEV ONLY: uncomment to reset the quickpick flag
   //context.globalState.update('hasShownViewModeQuickpick', false);
-  // DEV ONLY: uncomment to reset the support notification
-  //context.globalState.update('doNotShowSupportNotification', false);
-  //context.globalState.update('supportNotificationLastShown', 0);
   // DEV ONLY: uncomment to reset the missing Git identity notification
   //context.globalState.update('doNotShowMissingGitIdentityNotification', false);
   // DEV ONLY: uncomment to reset the incoming commits notification flag
@@ -289,7 +250,6 @@ export function activate(context: vscode.ExtensionContext): void {
   showViewModeQuickpick(context.globalState);
   context.subscriptions.push(watchAvatarSetting());
   void migrateAvatarSettings(context.globalState);
-  setTimeout(() => maybeShowSupportNotification(context.globalState), 5 * 60 * 1000); // DEV: use 5 * 60 * 1000 for production
 
   const shelveDocProvider = new ShelveDocumentProvider();
   context.subscriptions.push(
@@ -307,7 +267,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const profileService = new GitProfileService(context, log);
   const profilesReady = profileService.autoInitIfEmpty();
 
-  initAiSecrets(context);
   const integrationAccounts = new IntegrationAccountStore(context.secrets, context.globalState);
   const pullRequestManager = new PullRequestManager(manager, integrationAccounts, context.workspaceState);
   avatarResolver.setForgeLookup(
@@ -360,17 +319,6 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   issueDetailPanel.setPullRequestDetailPanel(pullRequestDetailPanel);
 
-  // GitCharm's MCP server for coding agents: off until gitcharm.mcp.enabled is turned on.
-  const mcpService = new McpService(context, { manager, profileService, pullRequestManager, issueManager });
-  SettingsPanel.setMcpService(mcpService);
-  context.subscriptions.push(
-    mcpService,
-    vscode.commands.registerCommand('gitcharm.mcp.installInAgents', () => mcpService.pickAgents()),
-  );
-  const issueResolvePanel = new IssueResolvePanel(context.extensionUri, manager, issueManager, prDocProvider, (_repoId, _issue, commitDraft) => {
-    void commitPanel.showCommitDraft(commitDraft);
-  });
-  issueDetailPanel.setIssueResolvePanel(issueResolvePanel);
   pullRequestDetailPanel.setIssueSupport(issueManager, issueDetailPanel);
   commitPanel.setIssueSupport(issueManager, issueDetailPanel, createIssuePanel);
   logPanel.setCommitPanel(commitPanel);
@@ -432,7 +380,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     issueDetailPanel,
     createIssuePanel,
-    issueResolvePanel,
     manager,
     badge,
     logPanel,
@@ -444,7 +391,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   registerCommands(context, commitPanel, logPanel, branchStatusBar, annotationController, profileStatusBar, manager, context.extensionUri, integrations);
-  registerConflictAiCommands(context, manager);
   registerInteractiveRebase(context, manager, () => { logPanel.refresh(); commitPanel.refresh(); });
 
   context.subscriptions.push(

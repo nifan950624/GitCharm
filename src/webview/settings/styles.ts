@@ -12,15 +12,6 @@ body { background: var(--vscode-editor-background); color: var(--vscode-foregrou
 
 /* ── Header: search + scope tabs ─────────────────────────────────────────── */
 .gc-header { flex-shrink: 0; padding: 11px 24px 0; max-width: 1200px; width: 100%; margin: 0 auto; }
-/* Support banner: always visible above the search. */
-.gc-support {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 10px 8px 12px; border-radius: 4px;
-  background: color-mix(in srgb, var(--vscode-button-background) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--vscode-button-background) 40%, transparent);
-}
-.gc-support-icon { color: var(--vscode-charts-red, #f14c4c); flex-shrink: 0; }
-.gc-support-text { flex: 1; min-width: 0; font-size: 12px; line-height: 1.45; }
-.gc-support-btn { flex-shrink: 0; padding: 3px 10px; font-size: 12px; }
 .gc-search {
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 3px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
@@ -65,8 +56,6 @@ body { background: var(--vscode-editor-background); color: var(--vscode-foregrou
 @media (max-width: 760px) {
   .gc-toc { display: none; }
   .gc-header { padding: 11px 12px 0; }
-  .gc-support { flex-wrap: wrap; }
-  .gc-support-btn { margin-left: 22px; }
   .gc-content { padding: 0 12px 32px; }
 }
 
@@ -144,13 +133,6 @@ body { background: var(--vscode-editor-background); color: var(--vscode-foregrou
 /* Radio: drawn like GitCharm's themed checkboxes (webviewHtml.ts), round. */
 .gc-radio { position: relative; flex-shrink: 0; width: 14px; height: 14px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--vscode-focusBorder, #007fd4); }
 .gc-enum-card.selected .gc-radio::after { content: ''; position: absolute; inset: 2px; border-radius: 50%; background: var(--vscode-focusBorder, #007fd4); }
-.gc-ai-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0; color: var(--vscode-foreground); }
-.gc-enum-card:not(.selected) .gc-ai-icon { opacity: 0.75; }
-.gc-ai-icon-badge {
-  position: absolute; right: -4px; bottom: -3px; font-size: 10px !important; padding: 1px; border-radius: 3px;
-  background: var(--vscode-input-background); color: var(--vscode-foreground);
-}
-.gc-enum-card.selected .gc-ai-icon-badge { background: color-mix(in srgb, var(--vscode-focusBorder) 12%, var(--vscode-input-background)); }
 .gc-enum-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .gc-enum-title { font-weight: 600; }
 .gc-enum-desc { font-size: 12px; line-height: 16px; color: var(--vscode-descriptionForeground); }
@@ -215,38 +197,6 @@ body { background: var(--vscode-editor-background); color: var(--vscode-foregrou
 .gc-color::-webkit-color-swatch-wrapper { padding: 2px; }
 .gc-color::-webkit-color-swatch { border: none; }
 
-/* ── AI ──────────────────────────────────────────────────────────────────── */
-.gc-ai-body.dimmed { opacity: 0.6; }
-.gc-apikey-status { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: var(--vscode-descriptionForeground); }
-.gc-model-status { margin-top: 5px; font-size: 12px; color: var(--vscode-descriptionForeground); display: flex; align-items: flex-start; gap: 4px; word-break: break-word; max-width: 500px; }
-.gc-model-status.warning { color: var(--vscode-editorWarning-foreground); }
-.gc-test-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.gc-test-result { margin-top: 8px; display: flex; align-items: flex-start; gap: 6px; word-break: break-word; max-width: 760px; }
-.gc-test-result.ok .codicon { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
-.gc-test-result.error { color: var(--vscode-errorForeground); }
-
-.gc-operations { display: flex; flex-direction: column; gap: 6px; max-width: 780px; }
-.gc-operation { border: 1px solid var(--vscode-input-border, rgba(128,128,128,0.35)); border-radius: 4px; background: var(--vscode-input-background); }
-.gc-operation.own { border-left: 2px solid var(--vscode-settings-modifiedItemIndicator, var(--vscode-focusBorder)); }
-.gc-operation-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
-.gc-operation-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.gc-operation-name { font-weight: 600; }
-.gc-operation-model { font-size: 12px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gc-operation-editor { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px 36px; border-top: 1px solid var(--vscode-input-border, rgba(128,128,128,0.25)); }
-.gc-provider-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.gc-provider-chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 6px; border-radius: 999px; font: inherit; font-size: 12px; cursor: pointer;
-  color: var(--vscode-foreground); background: transparent; border: 1px solid var(--vscode-input-border, rgba(128,128,128,0.35));
-}
-.gc-provider-chip:hover { background: var(--vscode-list-hoverBackground); }
-.gc-provider-chip.selected { border-color: var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent); }
-.gc-provider-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.gc-provider-chip .gc-ai-icon { width: 16px; height: 16px; }
-.gc-provider-chip .gc-ai-icon svg { width: 14px; height: 14px; }
-.gc-provider-chip .gc-ai-icon .codicon { font-size: 14px !important; }
-/* The chip's label already says CLI. */
-.gc-provider-chip .gc-ai-icon-badge { display: none; }
-
 /* ── Cloud Integrations ──────────────────────────────────────────────────── */
 .gc-integrations { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0 14px; max-width: 780px; }
 .gc-integration {
@@ -267,8 +217,6 @@ body { background: var(--vscode-editor-background); color: var(--vscode-foregrou
 .gc-integration-name { font-weight: 600; }
 .gc-integration-desc { font-size: 12px; color: var(--vscode-descriptionForeground); }
 .gc-status-ok { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #89d185)); }
-.gc-status-error { display: inline-flex; align-items: center; gap: 4px; color: var(--vscode-errorForeground); }
-.gc-path { font-family: var(--vscode-editor-font-family); font-size: 12px; word-break: break-all; text-align: left; }
 .gc-integration-body { padding: 4px 12px 12px 38px; border-top: 1px solid var(--vscode-input-border, rgba(128,128,128,0.25)); }
 .gc-integration-body > .gc-row-desc { margin: 6px 0; }
 .gc-accounts { max-width: 100%; margin-top: 6px; }
