@@ -91,6 +91,10 @@
         "label": "GitCharm"
       },
       {
+        "id": "gitcharm/editor",
+        "label": "GitCharm"
+      },
+      {
         "id": "gitcharm/commitPanel.fileView",
         "label": "%submenu.commitPanel.fileView.label%"
       },
@@ -1120,7 +1124,7 @@
       "gitcharm/explorer": [
         {
           "command": "gitcharm.showFileHistory",
-          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "when": "resourceScheme == file",
           "group": "navigation@1"
         },
         {
@@ -1131,29 +1135,36 @@
       ],
       "editor/context": [
         {
-          "command": "gitcharm.showFileHistory",
+          "submenu": "gitcharm/editor",
           "when": "resourceScheme == file",
           "group": "gitcharm@1"
+        }
+      ],
+      "gitcharm/editor": [
+        {
+          "command": "gitcharm.showFileHistory",
+          "when": "resourceScheme == file",
+          "group": "navigation@1"
         },
         {
           "command": "gitcharm.compareWith",
           "when": "resourceScheme == file",
-          "group": "gitcharm@1"
+          "group": "navigation@2"
         },
         {
           "command": "gitcharm.openMergeEditor",
           "when": "resourceScheme == file",
-          "group": "gitcharm@2"
+          "group": "navigation@3"
         },
         {
           "command": "gitcharm.openGitAnnotations",
           "when": "resourceScheme == file && config.gitcharm.gitAnnotations.enabled && !gitcharm.annotationsVisible",
-          "group": "gitcharm@3"
+          "group": "navigation@4"
         },
         {
           "command": "gitcharm.closeGitAnnotations",
           "when": "resourceScheme == file && gitcharm.annotationsVisible",
-          "group": "gitcharm@3"
+          "group": "navigation@4"
         }
       ]
     },

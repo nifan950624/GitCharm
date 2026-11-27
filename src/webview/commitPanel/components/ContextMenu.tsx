@@ -8,6 +8,8 @@ export interface ContextMenuItem {
   danger?: boolean;
   /** Count shown as a pill at the right edge of the item, styled like VS Code's own badges. */
   badge?: string;
+  /** Nested entries. The row opens them beside the menu instead of selecting an action. */
+  children?: ContextMenuEntry[];
   separator?: false;
 }
 export interface ContextMenuSeparator {
@@ -85,28 +87,58 @@ export function ContextMenu({ x, y, items, onSelect, onClose, width, anchor, men
     ...(pos?.maxHeight ? { maxHeight: pos.maxHeight, overflowY: 'auto' as const } : {}),
   };
 
+  const openLeft = (pos?.x ?? x) > window.innerWidth * 0.6;
+
   return (
     <div ref={ref} style={{ ...styles.menu, ...menuStyle, ...style }}>
+      <MenuRows items={items} onSelect={onSelect} onClose={onClose} openLeft={openLeft} />
+    </div>
+  );
+}
+
+function MenuRows({ items, onSelect, onClose, openLeft }: {
+  items: ContextMenuEntry[];
+  onSelect: (id: string) => void;
+  onClose: () => void;
+  openLeft: boolean;
+}) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <>
       {items.map((item, i) => {
         if ('separator' in item && item.separator) {
-          return <div key={i} style={styles.separator} />;
+          return <div key={`sep-${i}`} style={styles.separator} />;
         }
-        const it = item as ContextMenuItem;
+        const it = item;
+        const nested = it.children ?? [];
+        const hasChildren = nested.length > 0;
         return (
           <div
             key={it.id}
-            style={styles.item(!!it.danger)}
-            onClick={() => { onSelect(it.id); onClose(); }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--vscode-menu-selectionBackground)'; e.currentTarget.style.color = it.danger ? 'var(--vscode-errorForeground)' : 'var(--vscode-menu-selectionForeground)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = it.danger ? 'var(--vscode-errorForeground)' : 'var(--vscode-menu-foreground, var(--vscode-foreground))'; }}
+            style={{ position: 'relative' }}
+            onMouseEnter={() => { if (hasChildren) setOpenId(it.id); }}
+            onMouseLeave={() => { if (hasChildren) setOpenId(current => current === it.id ? null : current); }}
           >
-            <Codicon name={it.icon} style={styles.icon} />
-            <span style={styles.label}>{it.label}</span>
-            {it.badge && <span style={styles.badge}>{it.badge}</span>}
+            <div
+              style={styles.item(!!it.danger)}
+              onClick={() => { if (hasChildren) return; onSelect(it.id); onClose(); }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--vscode-menu-selectionBackground)'; e.currentTarget.style.color = it.danger ? 'var(--vscode-errorForeground)' : 'var(--vscode-menu-selectionForeground)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = it.danger ? 'var(--vscode-errorForeground)' : 'var(--vscode-menu-foreground, var(--vscode-foreground))'; }}
+            >
+              <Codicon name={it.icon} style={styles.icon} />
+              <span style={styles.label}>{it.label}</span>
+              {it.badge && <span style={styles.badge}>{it.badge}</span>}
+              {hasChildren && <Codicon name="chevron-right" style={styles.chevron} />}
+            </div>
+            {hasChildren && openId === it.id && (
+              <div style={{ ...styles.menu, ...styles.flyout(openLeft) }}>
+                <MenuRows items={nested} onSelect={onSelect} onClose={onClose} openLeft={openLeft} />
+              </div>
+            )}
           </div>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -135,11 +167,24 @@ const styles = {
     transition: 'background 0.08s',
   }),
   label: {
+    flex: 1,
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap' as const,
   },
+  chevron: {
+    fontSize: '12px',
+    opacity: 0.7,
+    flexShrink: 0,
+  },
+  flyout: (openLeft: boolean): React.CSSProperties => ({
+    position: 'absolute',
+    top: 0,
+    left: openLeft ? undefined : 'calc(100% - 4px)',
+    right: openLeft ? 'calc(100% - 4px)' : undefined,
+    zIndex: 1,
+  }),
   badge: {
     background: 'var(--vscode-badge-background)',
     color: 'var(--vscode-badge-foreground)',

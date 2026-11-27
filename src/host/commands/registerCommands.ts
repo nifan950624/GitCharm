@@ -7,7 +7,6 @@ import { BranchStatusBar } from '../ui/BranchStatusBar';
 import { FileAnnotationController } from '../ui/FileAnnotationController';
 import { ProfileStatusBar } from '../ui/ProfileStatusBar';
 import { WorkspaceGitManager } from '../git/WorkspaceGitManager';
-import { openFileHistoryPanel } from '../panels/FileHistoryPanel';
 import { SettingsPanel } from '../panels/SettingsPanel';
 import { compareWithCommand } from '../panels/CompareWithCommand';
 import { hasConflictMarkers } from '../git/ConflictParser';
@@ -433,15 +432,14 @@ export function registerCommands(
 
     // ── File History ──────────────────────────────────────────────────────────
 
-    vscode.commands.registerCommand('gitcharm.showFileHistory', async (uri?: vscode.Uri) => {
-      if (!manager || !extensionUri) return;
-      // uri comes from explorer/context or editor/context; fall back to active editor
+    vscode.commands.registerCommand('gitcharm.showFileHistory', async (uri?: vscode.Uri, directory?: boolean) => {
       const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
       if (!fileUri || fileUri.scheme !== 'file') {
         vscode.window.showInformationMessage(vscode.l10n.t('Open a file to view its history.'));
         return;
       }
-      await openFileHistoryPanel(extensionUri, manager, fileUri, logPanel);
+      const directoryFlag = directory === true ? true : directory === false ? false : undefined;
+      await logPanel.showHistoryForUri(fileUri, directoryFlag);
     }),
 
     // ── Compare With ────────────────────────────────────────────────────────────

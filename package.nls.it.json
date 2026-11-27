@@ -75,7 +75,7 @@
   "command.logHideBranchSidebar.title": "Nascondi barra laterale dei branch",
   "command.logShowBranchSidebar.title": "Mostra barra laterale dei branch",
   "command.setGitLogDefaultLocation.title": "Imposta posizione predefinita del Log",
-  "command.showFileHistory.title": "Mostra cronologia del file",
+  "command.showFileHistory.title": "Mostra cronologia",
   "command.compareWith.title": "Confronta con…",
   "color.statusBarPullForeground.description": "Colore del testo nella barra di stato quando ci sono commit in arrivo (serve un pull)",
   "color.statusBarPushForeground.description": "Colore del testo nella barra di stato quando ci sono commit non inviati o il branch non è sul remote",

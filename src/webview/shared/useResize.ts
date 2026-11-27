@@ -8,6 +8,8 @@ import { useRef, useCallback } from 'react';
  * There is no fixed maximum: the pane grows until flexible siblings reach their
  * min size. It is laid out as `flex: 0 1 <size>` with a minimum, so a narrow
  * window shrinks it to that minimum and gives the size back when there is room.
+ * `limit: 'max'` caps the pane instead of pinning it, so leftover space stays
+ * with the flexible sibling once the content is fully visible.
  */
 export interface ResizeOptions {
   /** Stable key. The dragged size is restored the next time this pane mounts. */
@@ -18,6 +20,11 @@ export interface ResizeOptions {
   side: 'before' | 'after';
   initial: number;
   min: number;
+  /**
+   * 'fixed' pins the pane to the dragged size.
+   * 'max' only caps it: shorter content stays content-sized, and the flexible sibling keeps the leftover space.
+   */
+  limit?: 'fixed' | 'max';
 }
 
 interface ResizeBinding {
@@ -40,30 +47,36 @@ export function useResize(
   const axis = options.axis ?? 'x';
   const { id, side } = options;
   const minSize = options.min;
+  const limit = options.limit ?? 'fixed';
 
   const elRef = useRef<HTMLDivElement | null>(null);
   const sizeRef = useRef(readSize(id, options.initial));
 
   const panelRef = useCallback((el: HTMLDivElement | null) => {
     elRef.current = el;
-    if (el) applySize(el, sizeRef.current, minSize, axis);
-  }, [axis, minSize]);
+    if (el) applySize(el, sizeRef.current, minSize, axis, limit);
+  }, [axis, limit, minSize]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const panel = elRef.current;
     if (!panel) return;
     const start = axis === 'x' ? e.clientX : e.clientY;
-    const startSize = axis === 'x' ? panel.offsetWidth : panel.offsetHeight;
+    const rendered = axis === 'x' ? panel.offsetWidth : panel.offsetHeight;
+    // A max-capped pane may be shorter than its cap. Drag from the visible edge so shrinking tracks the pointer.
+    const startSize = limit === 'max' ? Math.min(sizeRef.current, rendered) : rendered;
     const max = Math.max(startSize, maxSize(panel, axis));
 
     const onMove = (ev: MouseEvent) => {
       const point = axis === 'x' ? ev.clientX : ev.clientY;
       const delta = side === 'before' ? point - start : start - point;
-      const next = Math.min(max, Math.max(minSize, startSize + delta));
+      let next = Math.min(max, Math.max(minSize, startSize + delta));
+      if (limit === 'max' && panel.scrollHeight > 0) {
+        next = Math.min(next, Math.max(minSize, panel.scrollHeight));
+      }
       sizeRef.current = next;
       writeSize(id, next);
-      if (elRef.current) applySize(elRef.current, next, minSize, axis);
+      if (elRef.current) applySize(elRef.current, next, minSize, axis, limit);
     };
 
     const onUp = () => {
@@ -77,7 +90,7 @@ export function useResize(
     document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-  }, [axis, id, minSize, side]);
+  }, [axis, id, limit, minSize, side]);
 
   return { panelRef, onMouseDown };
 }
@@ -97,13 +110,28 @@ function writeSize(id: string | undefined, size: number) {
   try { localStorage.setItem(STORAGE_PREFIX + id, String(Math.round(size))); } catch { /* storage unavailable */ }
 }
 
-function applySize(el: HTMLDivElement, size: number, min: number, axis: 'x' | 'y') {
+function applySize(el: HTMLDivElement, size: number, min: number, axis: 'x' | 'y', limit: 'fixed' | 'max') {
   const px = `${size}px`;
+  if (limit === 'max') {
+    el.style.flex = '0 1 auto';
+    if (axis === 'x') {
+      el.style.width = '';
+      el.style.maxWidth = px;
+      el.style.minWidth = `${min}px`;
+    } else {
+      el.style.height = '';
+      el.style.maxHeight = px;
+      el.style.minHeight = `${min}px`;
+    }
+    return;
+  }
   el.style.flex = `0 1 ${px}`;
   if (axis === 'x') {
+    el.style.maxWidth = '';
     el.style.width = px;
     el.style.minWidth = `${min}px`;
   } else {
+    el.style.maxHeight = '';
     el.style.height = px;
     el.style.minHeight = `${min}px`;
   }

@@ -8,6 +8,10 @@ export interface CommitFilters {
   branch: string;
   dateFrom: string;
   dateTo: string;
+  /** Repo-relative file or directory. Empty shows the whole log. */
+  path: string;
+  /** Set when the path was opened as one file, so git follows renames. Typing a path clears it. */
+  pathFollow: boolean;
   repoId: string | null;
   /** Compare mode (which commits: see CompareMode). Null when off; while set, `branch` is ignored. */
   compare: CompareRange | null;
@@ -81,6 +85,8 @@ const defaultCommitFilters: CommitFilters = {
   branch: '',
   dateFrom: '',
   dateTo: '',
+  path: '',
+  pathFollow: false,
   repoId: null,
   compare: null,
 };

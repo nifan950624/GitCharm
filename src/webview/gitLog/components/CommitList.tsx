@@ -14,6 +14,7 @@ import { Codicon } from '../../shared/Codicon';
 import { getVsCodeApi } from '../../shared/vscodeApi';
 import type { LogToHostMsg, LogColumns } from '../../../host/types/messages';
 import { selectionGroups } from '../utils/commitSelection';
+import { useLogStore } from '../store/logStore';
 import { AuthorAvatar } from '../../shared/AuthorAvatar';
 import { forgeSha } from '../../shared/avatars';
 import { formatDateTime, formatDateOnly, formatDateCompact } from '../../shared/dateUtils';
@@ -786,9 +787,8 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
               onDoubleClick={e => {
                 e.stopPropagation();
                 if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
-                getVsCodeApi().postMessage(commit.isWorkingTree
-                  ? { type: 'LOG_OPEN_WORKING_TREE_CHANGES', repoId: commit.repoId } satisfies LogToHostMsg
-                  : { type: 'LOG_OPEN_EXTENDED_DETAIL', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg);
+                if (commit.isWorkingTree) onSelect(commit);
+                else getVsCodeApi().postMessage({ type: 'LOG_OPEN_EXTENDED_DETAIL', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg);
               }}
               onContextMenu={e => {
                 e.preventDefault();
@@ -908,18 +908,6 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
                 <span style={{ ...styles.message, ...(isCurrentHead ? { fontWeight: 700 } : {}), ...(commit.parents.length >= 2 ? { opacity: 0.5 } : {}), ...(commit.isWorkingTree ? { fontStyle: 'italic', opacity: 0.5 } : {}) }}>{commit.message.split('\n')[0]}</span>
               </div>
 
-              {hoveredIndex === vrow.index && commit.isWorkingTree && (
-                <div style={styles.inlineActions}>
-                  <button
-                    data-log-action-btn=""
-                    style={styles.inlineActionBtn}
-                    title={l10n.t('Open Changes')}
-                    onClick={e => { e.stopPropagation(); getVsCodeApi().postMessage({ type: 'LOG_OPEN_WORKING_TREE_CHANGES', repoId: commit.repoId } satisfies LogToHostMsg); }}
-                  >
-                    <Codicon name="diff-multiple" style={{ fontSize: '16px', lineHeight: 1 }} />
-                  </button>
-                </div>
-              )}
               {hoveredIndex === vrow.index && !commit.isWorkingTree && (
                 <div style={styles.inlineActions}>
                   <button
@@ -929,14 +917,6 @@ export function CommitList({ layout, selectedHash, repoColors: _repoColors, repo
                     onClick={e => { e.stopPropagation(); getVsCodeApi().postMessage({ type: 'LOG_OPEN_EXTENDED_DETAIL', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg); }}
                   >
                     <Codicon name="open-in-product" style={{ fontSize: '16px', lineHeight: 1 }} />
-                  </button>
-                  <button
-                    data-log-action-btn=""
-                    style={styles.inlineActionBtn}
-                    title={l10n.t('Open Changes')}
-                    onClick={e => { e.stopPropagation(); getVsCodeApi().postMessage({ type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg); }}
-                  >
-                    <Codicon name="diff-multiple" style={{ fontSize: '16px', lineHeight: 1 }} />
                   </button>
                 </div>
               )}
@@ -1110,7 +1090,14 @@ function CommitPopover({ commit, rowTop, listRect, mouseX, onClose, popoverHover
       }
     };
     window.addEventListener('message', handler);
-    getVsCodeApi().postMessage({ type: 'LOG_REQUEST_COMMIT_FILES', requestId: reqId, repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg);
+    const { path, pathFollow } = useLogStore.getState().commitFilters;
+    getVsCodeApi().postMessage({
+      type: 'LOG_REQUEST_COMMIT_FILES',
+      requestId: reqId,
+      repoId: commit.repoId,
+      hash: commit.hash,
+      ...(path ? { filterPath: path, ...(pathFollow ? { filterFollow: true } : {}) } : {}),
+    } satisfies LogToHostMsg);
     return () => window.removeEventListener('message', handler);
   }, [commit.hash]);
 
@@ -1428,10 +1415,6 @@ function CommitContextMenu({ commit, x, y, multiSelected, allCommits, currentBra
       <>
         <div style={ctxStyles.backdrop} onClick={onClose} />
         <div ref={menuRef} style={ctxStyles.menu(menuPos.left, menuPos.top, menuPos.maxHeight)}>
-          <div data-ctx-item="" style={ctxStyles.item} onClick={() => send({ type: 'LOG_OPEN_WORKING_TREE_CHANGES', repoId: commit.repoId })}>
-            <Codicon name="diff-multiple" style={ctxStyles.icon} />
-            <span>{l10n.t('Open Changes')}</span>
-          </div>
           <div data-ctx-item="" style={ctxStyles.item} onClick={() => send({ type: 'LOG_SHOW_IN_COMMIT_PANEL' })}>
             <Codicon name="git-commit" style={ctxStyles.icon} />
             <span>{l10n.t('Show in Commit Panel')}</span>
@@ -1559,20 +1542,6 @@ function CommitContextMenu({ commit, x, y, multiSelected, allCommits, currentBra
         >
           <Codicon name="open-in-product" style={ctxStyles.icon} />
           <span>{l10n.t('Open Full Detail')}</span>
-        </div>
-        <div
-          data-ctx-item=""
-          style={ctxStyles.item}
-          onClick={() =>
-            send({
-              type: "LOG_OPEN_COMMIT_CHANGES",
-              repoId: commit.repoId,
-              hash: commit.hash,
-            })
-          }
-        >
-          <Codicon name="diff-multiple" style={ctxStyles.icon} />
-          <span>{l10n.t('Open Changes')}</span>
         </div>
         {!commit.isStash && (
           <div

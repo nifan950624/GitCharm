@@ -2,10 +2,10 @@ import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallba
 import type { CommitNode, RepoMeta, MergeParentCommit } from '../../shared/types';
 import { getVsCodeApi } from '../../shared/vscodeApi';
 import type { LogToHostMsg, HostToLogMsg, IconThemeData, CommitSelectionMode } from '../../../host/types/messages';
-import { commitRevision, selectionGroups } from '../utils/commitSelection';
+import { commitRevision } from '../utils/commitSelection';
 import type { CommitSelection } from '../utils/commitSelection';
 import { Codicon } from '../../shared/Codicon';
-import { groupRefs, branchColor, tagColor, headColor } from '../utils/refs';
+import { groupRefs, branchColor, tagColor, headColor, primaryBranchColor } from '../utils/refs';
 import { formatDateTime } from '../../shared/dateUtils';
 import type { RefGroup } from '../utils/refs';
 import { isPrimaryBranch } from '../../shared/branchUtils';
@@ -18,8 +18,8 @@ import { handleTreeNavKeyDown } from '../../shared/keyboardNav';
 import type { ChangedFile } from '../../../host/types/messages';
 import * as l10n from '@vscode/l10n';
 import { plural } from '../../shared/l10n';
-import { useResize } from '../../shared/useResize';
 import { ResizeHandle } from '../../shared/ResizeHandle';
+import { fileMatchesPath } from '../utils/pathFilter';
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -114,25 +114,135 @@ function FileContextMenu({ x, y, onShowDiff, onShowCombinedDiff, onEditSource, o
     );
   };
 
+  const openLeft = (pos?.x ?? x) > window.innerWidth * 0.6;
+
   return (
     <div ref={menuRef} style={menuStyle} onContextMenu={e => e.preventDefault()}>
       <Item icon="diff" label={l10n.t('Show Diff')} onClick={onShowDiff} />
+      <Item icon="history" label={l10n.t('Show File History')} onClick={onFileHistory} />
       {!isWorkingTree && (
         <>
           <Item icon="diff-multiple" label={l10n.t('Show Combined Diff')} onClick={onShowCombinedDiff} />
           <Item icon="git-compare" label={l10n.t('Compare with…')} onClick={onCompareWith} />
         </>
       )}
-      <Item icon="history" label={l10n.t('Show File History')} onClick={onFileHistory} />
-      <Item icon="go-to-file" label={l10n.t('Edit Source')} onClick={onEditSource} />
       {canApplyCommitChanges && (
         <>
           <Item icon="git-commit" label={l10n.t('Cherry-Pick Selected Changes')} onClick={onCherryPickFile} />
           <Item icon="discard" label={l10n.t('Revert Selected Changes')} onClick={onRevertFile} />
         </>
       )}
-      <Item icon="list-tree" label={l10n.t('Reveal in Explorer')} onClick={onRevealExplorer} />
-      <Item icon="folder-opened" label={l10n.t('Reveal in File Manager')} onClick={onRevealOS} />
+      <div style={{ height: '1px', background: 'var(--vscode-menu-separatorBackground, var(--vscode-panel-border))', margin: '4px 0' }} />
+      <Submenu icon="go-to-file" label={l10n.t('Go to')} openLeft={openLeft} itemStyle={itemStyle} hoverStyle={hoverStyle}>
+        <Item icon="go-to-file" label={l10n.t('Edit Source')} onClick={onEditSource} />
+        <Item icon="list-tree" label={l10n.t('Reveal in Explorer')} onClick={onRevealExplorer} />
+        <Item icon="folder-opened" label={l10n.t('Reveal in File Manager')} onClick={onRevealOS} />
+      </Submenu>
+    </div>
+  );
+}
+
+function Submenu({ icon, label, openLeft, itemStyle, hoverStyle, children }: {
+  icon: string;
+  label: string;
+  openLeft: boolean;
+  itemStyle: React.CSSProperties;
+  hoverStyle: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      style={{ position: 'relative' }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <div style={{ ...itemStyle, ...(open ? hoverStyle : {}), paddingRight: '8px' }}>
+        <Codicon name={icon} style={{ fontSize: '13px', flexShrink: 0 }} />
+        <span style={{ flex: 1 }}>{label}</span>
+        <Codicon name="chevron-right" style={{ fontSize: '12px', opacity: 0.7 }} />
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: openLeft ? undefined : 'calc(100% - 4px)',
+          right: openLeft ? 'calc(100% - 4px)' : undefined,
+          background: 'var(--vscode-menu-background)',
+          border: '1px solid var(--vscode-menu-border, var(--vscode-panel-border))',
+          borderRadius: '4px',
+          padding: '3px 0',
+          minWidth: '180px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+          zIndex: 1,
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DirHistoryMenu({ x, y, onShowHistory, onClose }: { x: number; y: number; onShowHistory: () => void; onClose: () => void }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [hovered, setHovered] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const margin = 4;
+    setPos({
+      x: Math.max(margin, Math.min(x, window.innerWidth - el.offsetWidth - margin)),
+      y: Math.max(margin, Math.min(y, window.innerHeight - el.offsetHeight - margin)),
+    });
+  }, [x, y]);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      onClose();
+    };
+    document.addEventListener('mousedown', h, true);
+    window.addEventListener('blur', onClose);
+    return () => {
+      document.removeEventListener('mousedown', h, true);
+      window.removeEventListener('blur', onClose);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      onContextMenu={e => e.preventDefault()}
+      style={{
+        position: 'fixed',
+        left: pos?.x ?? x,
+        top: pos?.y ?? y,
+        visibility: pos ? 'visible' : 'hidden',
+        background: 'var(--vscode-menu-background)',
+        border: '1px solid var(--vscode-menu-border, var(--vscode-panel-border))',
+        borderRadius: '4px',
+        padding: '3px 0',
+        zIndex: 9999,
+        minWidth: '160px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 12px', fontSize: '12px', cursor: 'pointer',
+          color: hovered ? 'var(--vscode-menu-selectionForeground)' : 'var(--vscode-menu-foreground)',
+          background: hovered ? 'var(--vscode-menu-selectionBackground)' : 'transparent',
+          userSelect: 'none',
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onClick={() => { onShowHistory(); onClose(); }}
+      >
+        <Codicon name="history" style={{ fontSize: '13px', flexShrink: 0 }} />
+        {l10n.t('Show History')}
+      </div>
     </div>
   );
 }
@@ -165,6 +275,8 @@ interface Props {
    * panel) where there's room for two columns, unlike the narrow Log Panel sidebar this
    * component is otherwise embedded in. */
   twoColumnLayout?: boolean;
+  /** Log path filter. Merge-parent file lists use the same path as the diff tree. */
+  pathFilter?: { path: string; follow: boolean };
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -244,6 +356,88 @@ function OpenDetailRow({ repoId, hash, style, children }: { repoId: string; hash
 
 const TREE_MIN_HEIGHT = 24;
 const DETAIL_MIN_HEIGHT = 28;
+const DETAIL_SLOPE_KEY = 'gitcharm.split.log.detailInfoSlope';
+/** Initial share of new height taken by the log. The tree takes the rest, and its share rises as the pane grows. */
+const DETAIL_SLOPE_DEFAULT = 0.35;
+
+function readDetailSlope(): number {
+  try {
+    const n = Number(localStorage.getItem(DETAIL_SLOPE_KEY));
+    return Number.isFinite(n) && n >= 0.05 && n <= 4 ? n : DETAIL_SLOPE_DEFAULT;
+  } catch {
+    return DETAIL_SLOPE_DEFAULT;
+  }
+}
+
+function writeDetailSlope(slope: number) {
+  try { localStorage.setItem(DETAIL_SLOPE_KEY, String(Math.round(slope * 1000) / 1000)); } catch { /* storage unavailable */ }
+}
+
+interface DetailSplitMeasure {
+  spare: number;
+  room: number;
+  content: number;
+  limit: number;
+}
+
+/** Border-box height that fits the message. Read from the inner content, not the scroller:
+ *  the scroller's scrollHeight grows with the height just assigned to it, so a resize loop shakes the pane. */
+function contentBoxHeight(info: HTMLElement, content: HTMLElement | null): number {
+  if (!content) return info.scrollHeight;
+  const style = getComputedStyle(info);
+  const pad = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+  return content.offsetHeight + pad + border;
+}
+
+/** Space the log and the tree can share, and how tall the log's content wants to be. */
+function measureDetailSplit(root: HTMLElement, info: HTMLElement, content: HTMLElement | null): DetailSplitMeasure {
+  let fixed = 0;
+  for (const child of Array.from(root.children)) {
+    if (child === info || !(child instanceof HTMLElement)) continue;
+    const style = getComputedStyle(child);
+    if (style.display === 'none' || style.position === 'absolute' || style.position === 'fixed') continue;
+    if (parseFloat(style.flexGrow) > 0) continue;
+    fixed += child.offsetHeight;
+  }
+  const pair = Math.max(0, root.clientHeight - fixed);
+  const contentHeight = Math.round(contentBoxHeight(info, content));
+  return {
+    spare: Math.max(0, pair - TREE_MIN_HEIGHT - DETAIL_MIN_HEIGHT),
+    room: Math.max(0, contentHeight - DETAIL_MIN_HEIGHT),
+    content: contentHeight,
+    limit: Math.max(DETAIL_MIN_HEIGHT, pair - TREE_MIN_HEIGHT),
+  };
+}
+
+/** Log height eases toward the message, so later growth goes to the tree. */
+function infoGain(spare: number, room: number, slope: number): number {
+  if (spare <= 0 || room <= 0 || slope <= 0) return 0;
+  return Math.min(room, spare, room * (1 - Math.exp(-slope * spare / room)));
+}
+
+function heightFromSlope(measure: DetailSplitMeasure, slope: number): number {
+  const gain = infoGain(measure.spare, measure.room, slope);
+  const cap = measure.content > 0 ? measure.content : measure.limit;
+  return Math.max(DETAIL_MIN_HEIGHT, Math.min(measure.limit, cap, DETAIL_MIN_HEIGHT + gain));
+}
+
+function slopeFor(spare: number, room: number, gain: number): number {
+  if (spare <= 0 || room <= 0 || gain <= 0) return 0.05;
+  if (gain >= room - 0.5) return 4;
+  const ratio = Math.min(0.995, gain / room);
+  const slope = -(room / spare) * Math.log(1 - ratio);
+  return Math.min(4, Math.max(0.05, slope));
+}
+
+function applyInfoHeight(info: HTMLElement, height: number) {
+  const px = `${Math.round(height)}px`;
+  if (info.style.height === px) return;
+  info.style.flex = '0 0 auto';
+  info.style.height = px;
+  info.style.maxHeight = px;
+  info.style.minHeight = `${DETAIL_MIN_HEIGHT}px`;
+}
 
 function sidebarAuthor(commit: CommitNode, activeProfile?: { gitName: string; gitEmail: string }): { name: string; email: string } {
   if (commit.isStash || commit.isWorkingTree) {
@@ -254,7 +448,7 @@ function sidebarAuthor(commit: CommitNode, activeProfile?: { gitName: string; gi
 
 /* ─── Main component ──────────────────────────────────────────────────────── */
 
-export function CommitDetail({ commit, fullMessage, selection, onSelectionModeChange, files, selectedFile, loadingFiles, repoColor, repoColors, repos, iconTheme, onSelectFile, onClose, refColors, activeProfile, hideExtendedDetailButton, twoColumnLayout }: Props) {
+export function CommitDetail({ commit, fullMessage, selection, onSelectionModeChange, files, selectedFile, loadingFiles, repoColor, repoColors, repos, iconTheme, onSelectFile, onClose, refColors, activeProfile, hideExtendedDetailButton, twoColumnLayout, pathFilter }: Props) {
   // Most of the pane is about one commit; a selection only reuses the file list
   const range = !!selection;
   // Same id/rule as CommitList.tsx's injection — that component isn't always mounted alongside
@@ -298,10 +492,16 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
   // commit list) — it never affects the file list/context-menu in the right sidebar,
   // which always stays on the commit this panel is showing.
   const [expandedMergeHash, setExpandedMergeHash] = useState<string | null>(null);
-  const [mergeCommitFiles, setMergeCommitFiles] = useState<Record<string, Array<{ path: string; status: string; added?: number; removed?: number }>>>({});
+  const [mergeCommitFiles, setMergeCommitFiles] = useState<Record<string, Array<{ path: string; status: string; added?: number; removed?: number; oldPath?: string }>>>({});
   const [mergeCommitFilesLoading, setMergeCommitFilesLoading] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setMergeCommitFiles({});
+    setMergeCommitFilesLoading({});
+    setExpandedMergeHash(null);
+  }, [commit?.hash, pathFilter?.path, pathFilter?.follow]);
   const pendingRef = useRef<Map<string, (msg: HostToLogMsg) => void>>(new Map());
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: FileEntry } | null>(null);
+  const [dirMenu, setDirMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const [refsExpanded, setRefsExpanded] = useState(false);
   const [descendantBranches, setDescendantBranches] = useState<{ local: string[]; remote: string[]; tags: string[] }>({ local: [], remote: [], tags: [] });
   const [loadingDescendants, setLoadingDescendants] = useState(false);
@@ -590,12 +790,84 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
       requestId: reqId,
       repoId: commit!.repoId,
       hash: c.hash,
+      ...(pathFilter?.path ? { filterPath: pathFilter.path, ...(pathFilter.follow ? { filterFollow: true } : {}) } : {}),
     } satisfies LogToHostMsg);
   }
 
-  const { panelRef: treePaneRef, onMouseDown: onTreeResize } = useResize({
-    id: 'log.detailTree', axis: 'y', side: 'before', initial: 200, min: TREE_MIN_HEIGHT,
-  });
+  const detailRootRef = useRef<HTMLDivElement | null>(null);
+  const detailPaneRef = useRef<HTMLDivElement | null>(null);
+  const detailContentRef = useRef<HTMLDivElement | null>(null);
+  const detailSlopeRef = useRef(readDetailSlope());
+  const detailDragRef = useRef(false);
+  // Same pane size and message height already produced this log height. Applying it again
+  // feeds the resize observer and the log pane shakes while the panel is dragged.
+  const detailLayoutKeyRef = useRef('');
+
+  const layoutDetailSplit = useCallback(() => {
+    if (twoColumnLayout || detailDragRef.current) return;
+    const root = detailRootRef.current;
+    const info = detailPaneRef.current;
+    if (!root || !info) return;
+    const measure = measureDetailSplit(root, info, detailContentRef.current);
+    const key = `${Math.round(root.clientWidth)}x${Math.round(root.clientHeight)}:${measure.content}`;
+    if (key === detailLayoutKeyRef.current) return;
+    const next = heightFromSlope(measure, detailSlopeRef.current);
+    detailLayoutKeyRef.current = key;
+    applyInfoHeight(info, next);
+  }, [twoColumnLayout]);
+
+  useLayoutEffect(() => {
+    detailLayoutKeyRef.current = '';
+    layoutDetailSplit();
+  }, [layoutDetailSplit, commit, fullMessage, selection]);
+
+  const hasCommit = !!commit;
+  useEffect(() => {
+    const root = detailRootRef.current;
+    if (!root || twoColumnLayout) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => layoutDetailSplit());
+    });
+    observer.observe(root);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [layoutDetailSplit, twoColumnLayout, hasCommit]);
+
+  const onDetailInfoResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const info = detailPaneRef.current;
+    const root = detailRootRef.current;
+    if (!info || !root) return;
+    detailDragRef.current = true;
+    const startY = e.clientY;
+    const startH = info.offsetHeight;
+
+    const onMove = (ev: MouseEvent) => {
+      const measure = measureDetailSplit(root, info, detailContentRef.current);
+      const next = Math.max(DETAIL_MIN_HEIGHT, Math.min(measure.limit, measure.content || measure.limit, startH + (startY - ev.clientY)));
+      applyInfoHeight(info, next);
+      detailSlopeRef.current = slopeFor(measure.spare, measure.room, Math.max(0, next - DETAIL_MIN_HEIGHT));
+    };
+    const onUp = () => {
+      detailDragRef.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      writeDetailSlope(detailSlopeRef.current);
+      detailLayoutKeyRef.current = '';
+      layoutDetailSplit();
+    };
+
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [layoutDetailSplit]);
 
   if (!commit) {
     return (
@@ -626,21 +898,25 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
       isFileSelected={f => selectedFile?.path === f.path && (!f.repoId || !selectedFile.repoId || selectedFile.repoId === f.repoId)}
       isFileContextActive={f => ctxMenu?.file.path === f.path}
       onOpenFile={f => openVscodeDiff(f, activeHash)}
-      onContextMenuFile={range ? undefined : (e, f) => setCtxMenu({ x: e.clientX, y: e.clientY, file: f })}
+      onContextMenuFile={range ? undefined : (e, f) => { setDirMenu(null); setCtxMenu({ x: e.clientX, y: e.clientY, file: f }); }}
+      onContextMenuDir={range ? undefined : (e, dirPath) => { setCtxMenu(null); setDirMenu({ x: e.clientX, y: e.clientY, path: dirPath }); }}
     />
   );
 
   return (
     <div
+      ref={twoColumnLayout ? undefined : detailRootRef}
       className={twoColumnLayout ? 'commit-detail-two-column' : undefined}
       style={twoColumnLayout ? styles.containerTwoColumn : styles.container}
       onContextMenu={e => e.preventDefault()}
     >
       {/* Commit header */}
       <div
+        ref={twoColumnLayout ? undefined : detailPaneRef}
         className={twoColumnLayout ? 'commit-detail-two-column-header' : undefined}
         style={twoColumnLayout ? styles.headerTwoColumn : { ...styles.header, ...styles.sidebarDetails }}
       >
+        <div ref={twoColumnLayout ? undefined : detailContentRef} style={twoColumnLayout ? styles.detailContentPassthrough : styles.detailContent}>
         {selection ? (
           <>
             {twoColumnLayout && repoName && (
@@ -691,7 +967,7 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
           const hash = commit.isWorkingTree ? '' : (commit.isStash ? (commit.stashRef ?? commit.shortHash) : commit.shortHash);
           return (
             <div>
-              <div style={{ ...styles.summaryMessage, ...(commit.isWorkingTree ? { fontStyle: 'italic' as const } : {}) }}>
+              <div style={{ ...styles.summaryMessage, color: primaryBranchColor(), ...(commit.isWorkingTree ? { fontStyle: 'italic' as const } : {}) }}>
                 {commit.isWorkingTree ? l10n.t('Uncommitted Changes') : (fullMessage || commit.message)}
               </div>
               <div style={styles.summaryMeta}>
@@ -941,7 +1217,10 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
                     isLast={i === mergeCommits.length - 1}
                     onToggle={() => toggleMergeCommit(c)}
                     renderFiles={() => {
-                      const rawFiles = mergeCommitFiles[c.hash] ?? [];
+                      const loadedFiles = mergeCommitFiles[c.hash] ?? [];
+                      const rawFiles = pathFilter?.path && !pathFilter.follow
+                        ? loadedFiles.filter(file => fileMatchesPath(pathFilter.path, false, file))
+                        : loadedFiles;
                       return mergeCommitFilesLoading[c.hash] ? (
                         <div style={styles.mergeLoading}>{l10n.t('Loading files...')}</div>
                       ) : (
@@ -963,9 +1242,10 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
         )}
         </>
         )}
+        </div>
       </div>
 
-      {!twoColumnLayout && <ResizeHandle axis="y" onMouseDown={onTreeResize} style={{ order: 2 }} />}
+      {!twoColumnLayout && <ResizeHandle axis="y" onMouseDown={onDetailInfoResize} style={{ order: 2 }} />}
 
       {onSelectionModeChange && (
         <div style={twoColumnLayout ? styles.modeTabs : { ...styles.modeTabs, order: 0 }} role="tablist">
@@ -979,7 +1259,6 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
       )}
 
       <div
-        ref={twoColumnLayout ? undefined : treePaneRef}
         className={twoColumnLayout ? 'commit-detail-two-column-right' : undefined}
         style={twoColumnLayout ? styles.rightColumn : styles.treePane}
       >
@@ -1024,40 +1303,8 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
           >
             <Codicon name="list-flat" style={styles.toolbarIcon} />
           </button>
-          {((twoColumnLayout && !range) || (!twoColumnLayout && ((selection && combined) || !range || onClose))) && (
+          {!twoColumnLayout && ((!range && !hideExtendedDetailButton && !commit.isWorkingTree) || onClose) && (
             <span style={styles.toolbarDivider} />
-          )}
-          {twoColumnLayout && !range && (
-            <button
-              data-top-action-btn=""
-              style={styles.toggleBtn(false)}
-              title={l10n.t('Open Changes')}
-              onClick={() => getVsCodeApi().postMessage({ type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
-            >
-              <Codicon name="diff-multiple" style={styles.toolbarIcon} />
-            </button>
-          )}
-          {!twoColumnLayout && selection && combined && (
-            <button
-              data-top-action-btn=""
-              style={styles.toggleBtn(false)}
-              title={l10n.t('Open Changes')}
-              onClick={() => getVsCodeApi().postMessage({ type: 'LOG_VIEW_COMBINED_DIFF', groups: selectionGroups(selection.commits) } satisfies LogToHostMsg)}
-            >
-              <Codicon name="diff-multiple" style={styles.toolbarIcon} />
-            </button>
-          )}
-          {!twoColumnLayout && !range && (
-            <button
-              data-top-action-btn=""
-              style={styles.toggleBtn(false)}
-              title={l10n.t('Open Changes')}
-              onClick={() => getVsCodeApi().postMessage(commit.isWorkingTree
-                ? { type: 'LOG_OPEN_WORKING_TREE_CHANGES', repoId: commit.repoId } satisfies LogToHostMsg
-                : { type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
-            >
-              <Codicon name="diff-multiple" style={styles.toolbarIcon} />
-            </button>
           )}
           {!twoColumnLayout && !range && !hideExtendedDetailButton && !commit.isWorkingTree && (
             <button
@@ -1095,6 +1342,19 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
           canApplyCommitChanges={!commit.isStash && !commit.isWorkingTree}
           isWorkingTree={commit.isWorkingTree}
           onClose={() => setCtxMenu(null)}
+        />
+      )}
+      {dirMenu && commit && !range && (
+        <DirHistoryMenu
+          x={dirMenu.x}
+          y={dirMenu.y}
+          onShowHistory={() => getVsCodeApi().postMessage({
+            type: 'LOG_SHOW_FILE_HISTORY',
+            repoId: commit.repoId,
+            filePath: dirMenu.path,
+            directory: true,
+          } satisfies LogToHostMsg)}
+          onClose={() => setDirMenu(null)}
         />
       )}
 
@@ -1149,6 +1409,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column' as const,
     height: '100%',
+    minHeight: 0,
+    overflow: 'hidden',
     borderLeft: '1px solid var(--vscode-panel-border)',
     background: 'var(--vscode-sideBar-background)',
   },
@@ -1183,16 +1445,28 @@ const styles = {
   },
   sidebarDetails: {
     order: 3,
-    flex: '1 1 auto',
+    flex: '0 0 auto',
     minHeight: DETAIL_MIN_HEIGHT,
     boxSizing: 'border-box' as const,
     padding: '4px 8px',
-    gap: '2px',
+    gap: 0,
+    overflowX: 'hidden' as const,
     overflowY: 'auto' as const,
+    scrollbarGutter: 'stable' as const,
     borderBottom: 'none',
+  } as React.CSSProperties,
+  detailContent: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '2px',
+  } as React.CSSProperties,
+  detailContentPassthrough: {
+    display: 'contents',
   } as React.CSSProperties,
   treePane: {
     order: 1,
+    flex: '1 1 0%',
+    minHeight: TREE_MIN_HEIGHT,
     display: 'flex',
     flexDirection: 'column' as const,
     overflow: 'hidden',
@@ -1203,7 +1477,6 @@ const styles = {
     fontWeight: 600,
     fontSize: '13px',
     lineHeight: 1.45,
-    color: 'var(--vscode-charts-orange, #e08a6a)',
     whiteSpace: 'pre-wrap' as const,
     wordBreak: 'break-word' as const,
   } as React.CSSProperties,

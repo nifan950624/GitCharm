@@ -75,7 +75,7 @@
   "command.logHideBranchSidebar.title": "隐藏分支侧边栏",
   "command.logShowBranchSidebar.title": "显示分支侧边栏",
   "command.setGitLogDefaultLocation.title": "设置日志默认位置",
-  "command.showFileHistory.title": "显示文件历史记录",
+  "command.showFileHistory.title": "显示历史记录",
   "command.compareWith.title": "比较对象…",
   "color.statusBarPullForeground.description": "有可拉取的传入提交时的状态栏文本颜色（需要拉取）",
   "color.statusBarPushForeground.description": "存在未推送的提交或分支不在远程时的状态栏文本颜色",

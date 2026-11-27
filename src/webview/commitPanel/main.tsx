@@ -11,7 +11,7 @@ import { VscodeView } from './components/VscodeView';
 import { UnifiedCommitForm } from './components/UnifiedCommitForm';
 import type { SyncAction } from './syncState';
 import { layoutTabBar, type TabBarWidths } from './tabBarLayout';
-import { ContextMenu, type ContextMenuEntry } from './components/ContextMenu';
+import { ContextMenu, type ContextMenuEntry, type ContextMenuItem } from './components/ContextMenu';
 import { ShelvePanel } from './components/ShelvePanel';
 import { EmptyTabState } from './components/EmptyTabState';
 import { StashTab } from './components/StashTab';
@@ -63,6 +63,17 @@ function dynItems(items: ContextMenuEntry[], n: number): ContextMenuEntry[] {
 
 const revealOsLabel = () => l10n.t('Reveal in File Manager');
 
+const goToItems = (): ContextMenuItem => ({
+  id: 'go-to',
+  label: l10n.t('Go to'),
+  icon: 'go-to-file',
+  children: [
+    { id: 'jump', label: l10n.t('Jump to Source'), icon: 'go-to-file' },
+    { id: 'reveal-explorer', label: l10n.t('Reveal in Explorer'), icon: 'list-tree' },
+    { id: 'reveal-os', label: revealOsLabel(), icon: 'folder-opened' },
+  ],
+});
+
 const FILE_CONTEXT_ITEMS = (): ContextMenuEntry[] => [
   { id: 'rollback',        label: l10n.t('Rollback'),            icon: 'discard' },
   { id: 'shelve',          label: l10n.t('Shelve'),              icon: 'archive' },
@@ -70,9 +81,7 @@ const FILE_CONTEXT_ITEMS = (): ContextMenuEntry[] => [
   { id: 'diff',            label: l10n.t('Show Diff'),           icon: 'diff' },
   { id: 'compare-with',    label: l10n.t('Compare with…'),       icon: 'git-compare' },
   { id: 'file-history',    label: l10n.t('Show File History'),   icon: 'history' },
-  { id: 'jump',            label: l10n.t('Jump to Source'),      icon: 'go-to-file' },
-  { id: 'reveal-explorer', label: l10n.t('Reveal in Explorer'),  icon: 'list-tree' },
-  { id: 'reveal-os',       label: revealOsLabel(),       icon: 'folder-opened' },
+  goToItems(),
   { separator: true },
   { id: 'gitignore',       label: l10n.t('Add to .gitignore'),   icon: 'exclude' },
   { separator: true },
@@ -92,6 +101,7 @@ const FOLDER_CONTEXT_ITEMS = (): ContextMenuEntry[] => [
   { id: 'shelve',    label: l10n.t('Shelve Changes'),      icon: 'archive' },
   { id: 'stash',     label: l10n.t('Stash Changes'),       icon: 'git-stash' },
   { id: 'compare-with', label: l10n.t('Compare with…'),    icon: 'git-compare' },
+  { id: 'file-history', label: l10n.t('Show History'),    icon: 'history' },
   { separator: true },
   { id: 'gitignore', label: l10n.t('Add to .gitignore'),  icon: 'exclude' },
   { separator: true },
@@ -123,9 +133,7 @@ const VSCODE_FILE_STAGED_ITEMS = (): ContextMenuEntry[] => [
   { id: 'diff',            label: l10n.t('Show Diff'),            icon: 'diff' },
   { id: 'compare-with',    label: l10n.t('Compare with…'),        icon: 'git-compare' },
   { id: 'file-history',    label: l10n.t('Show File History'),    icon: 'history' },
-  { id: 'jump',            label: l10n.t('Jump to Source'),       icon: 'go-to-file' },
-  { id: 'reveal-explorer', label: l10n.t('Reveal in Explorer'),   icon: 'list-tree' },
-  { id: 'reveal-os',       label: revealOsLabel(),        icon: 'folder-opened' },
+  goToItems(),
   { separator: true },
   { id: 'refresh',         label: l10n.t('Refresh'),              icon: 'refresh' },
 ];
@@ -139,9 +147,7 @@ const VSCODE_FILE_UNSTAGED_ITEMS = (): ContextMenuEntry[] => [
   { id: 'diff',            label: l10n.t('Show Diff'),            icon: 'diff' },
   { id: 'compare-with',    label: l10n.t('Compare with…'),        icon: 'git-compare' },
   { id: 'file-history',    label: l10n.t('Show File History'),    icon: 'history' },
-  { id: 'jump',            label: l10n.t('Jump to Source'),       icon: 'go-to-file' },
-  { id: 'reveal-explorer', label: l10n.t('Reveal in Explorer'),   icon: 'list-tree' },
-  { id: 'reveal-os',       label: revealOsLabel(),        icon: 'folder-opened' },
+  goToItems(),
   { separator: true },
   { id: 'gitignore',       label: l10n.t('Add to .gitignore'),    icon: 'exclude' },
   { separator: true },
@@ -154,6 +160,7 @@ const VSCODE_FOLDER_STAGED_ITEMS = (): ContextMenuEntry[] => [
   { id: 'unstage',  label: l10n.t('Unstage Folder'),       icon: 'remove' },
   { separator: true },
   { id: 'compare-with', label: l10n.t('Compare with…'),    icon: 'git-compare' },
+  { id: 'file-history', label: l10n.t('Show History'),     icon: 'history' },
   { separator: true },
   { id: 'refresh',  label: l10n.t('Refresh'),              icon: 'refresh' },
 ];
@@ -164,6 +171,7 @@ const VSCODE_FOLDER_UNSTAGED_ITEMS = (): ContextMenuEntry[] => [
   { id: 'shelve',   label: l10n.t('Shelve Changes'),        icon: 'archive' },
   { id: 'stash',    label: l10n.t('Stash Changes'),         icon: 'git-stash' },
   { id: 'compare-with', label: l10n.t('Compare with…'),    icon: 'git-compare' },
+  { id: 'file-history', label: l10n.t('Show History'),     icon: 'history' },
   { separator: true },
   { id: 'gitignore',label: l10n.t('Add to .gitignore'),    icon: 'exclude' },
   { separator: true },
@@ -1214,6 +1222,9 @@ function App() {
       case 'compare-with':
         send({ type: 'COMMIT_COMPARE_FOLDER_WITH', repoId: ctx.repoId, folderPath: ctx.folderPath });
         break;
+      case 'file-history':
+        send({ type: 'COMMIT_SHOW_FILE_HISTORY', repoId: ctx.repoId, filePath: ctx.folderPath, directory: true });
+        break;
       case 'gitignore':
         send({ type: 'COMMIT_ADD_TO_GITIGNORE', repoId: ctx.repoId, entryPath: ctx.folderPath });
         break;
@@ -2204,6 +2215,12 @@ function App() {
                 files: files.map(file => ({ path: file.path, status: file.status, oldPath: file.oldPath })),
               });
             }}
+            onShowHistory={(repoId, filePath, directory) => send({
+              type: 'COMMIT_SHOW_FILE_HISTORY',
+              repoId,
+              filePath,
+              ...(directory ? { directory: true } : {}),
+            })}
             onGetFromBranch={file => send({
               type: 'COMMIT_BRANCH_DIFF_GET',
               repoId: file.repoId,
@@ -2341,7 +2358,7 @@ function App() {
             { id: 'stash',         label: l10n.t('Stash'),                icon: 'git-stash' },
             { id: 'diff',          label: l10n.t('Show Diff'),            icon: 'diff' },
             { id: 'file-history',  label: l10n.t('Show File History'),    icon: 'history' },
-            { id: 'jump',          label: l10n.t('Jump to Source'),       icon: 'go-to-file' },
+            goToItems(),
             { separator: true },
             { id: 'gitignore',     label: l10n.t('Add to .gitignore'),    icon: 'exclude' },
             { separator: true },
@@ -2358,7 +2375,7 @@ function App() {
               { id: 'stash',        label: l10n.t('Stash'),               icon: 'git-stash' },
               { id: 'diff',         label: l10n.t('Show Diff'),           icon: 'diff' },
               { id: 'file-history', label: l10n.t('Show File History'),   icon: 'history' },
-              { id: 'jump',         label: l10n.t('Jump to Source'),      icon: 'go-to-file' },
+              goToItems(),
               { separator: true },
               { id: 'gitignore',    label: l10n.t('Add to .gitignore'),   icon: 'exclude' },
               { separator: true },
@@ -2408,6 +2425,7 @@ function App() {
               { id: 'shelve',     label: l10n.t('Shelve Changes'),     icon: 'archive' },
               { id: 'stash',      label: l10n.t('Stash Changes'),      icon: 'git-stash' },
               { id: 'compare-with', label: l10n.t('Compare with…'),   icon: 'git-compare' },
+              { id: 'file-history', label: l10n.t('Show History'),  icon: 'history' },
               { separator: true },
               { id: 'gitignore',  label: l10n.t('Add to .gitignore'), icon: 'exclude' },
               { separator: true },

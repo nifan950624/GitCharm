@@ -75,7 +75,7 @@
   "command.logHideBranchSidebar.title": "Hide Branch Sidebar",
   "command.logShowBranchSidebar.title": "Show Branch Sidebar",
   "command.setGitLogDefaultLocation.title": "Set Default Log Location",
-  "command.showFileHistory.title": "Show File History",
+  "command.showFileHistory.title": "Show History",
   "command.compareWith.title": "Compare with...",
   "color.statusBarPullForeground.description": "Status bar text color when incoming commits are available (pull needed)",
   "color.statusBarPushForeground.description": "Status bar text color when there are unpushed commits or the branch is not on remote",

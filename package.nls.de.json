@@ -75,7 +75,7 @@
   "command.logHideBranchSidebar.title": "Branch-Seitenleiste ausblenden",
   "command.logShowBranchSidebar.title": "Branch-Seitenleiste einblenden",
   "command.setGitLogDefaultLocation.title": "Standardposition des Logs festlegen",
-  "command.showFileHistory.title": "Dateiverlauf anzeigen",
+  "command.showFileHistory.title": "Verlauf anzeigen",
   "command.compareWith.title": "Vergleichen mit…",
   "color.statusBarPullForeground.description": "Textfarbe der Statusleiste, wenn eingehende Commits verfügbar sind (Pull erforderlich)",
   "color.statusBarPushForeground.description": "Textfarbe der Statusleiste, wenn es nicht gepushte Commits gibt oder der Branch nicht auf dem Remote ist",

@@ -75,6 +75,17 @@ export function configuredPullMode(): PullMode | 'ask' {
   return mode === 'merge' || mode === 'rebase' || mode === 'ffOnly' ? mode : 'ask';
 }
 
+/** `-- path` for a log path filter. A spec of `.` is the whole repo, so it adds nothing. */
+function commitPathspec(spec: string | undefined): string[] {
+  const cleaned = (spec ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!cleaned || cleaned === '.') return [];
+  return ['--', pathspecArg(cleaned)];
+}
+
+function pathspecArg(spec: string): string {
+  return spec.startsWith('-') ? `./${spec}` : spec;
+}
+
 export class GitService {
   private git: SimpleGit;
   // Set immediately after a tag checkout, cleared when VS Code API confirms the update.
@@ -838,6 +849,72 @@ export class GitService {
     }
   }
 
+  /**
+   * File history the way WebStorm builds it. `git log --follow` drops commits that
+   * still changed the file (it follows one parent through a merge). `--full-history`
+   * keeps the opposite problem: merges that did not change the file.
+   * Walk `git log <rev> -- path` with default simplification, and when that history
+   * ends at a rename, continue from the parent with the previous name. Each segment
+   * stays in git's order, so the older name is appended instead of sorted back up by date.
+   */
+  private async fileHistoryAcrossRenames(logPrefix: string[], rev: string, spec: string, limit: number, skip: number): Promise<string> {
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    const walked = new Set<string>();
+    let currentRev = rev;
+    let currentPath = spec;
+    let remainingSkip = skip;
+    let remaining = limit;
+    for (let hop = 0; hop < 32 && currentRev && currentPath && remaining > 0; hop++) {
+      if (walked.has(currentPath)) break;
+      walked.add(currentPath);
+      const need = remainingSkip + remaining;
+      const raw = await this.git.raw([...logPrefix, `--max-count=${need}`, currentRev, '--', pathspecArg(currentPath)]);
+      const records = raw.split('\n').filter(line => line.trim());
+      if (records.length === 0) break;
+      for (const record of records) {
+        const hash = record.split('\x00')[0];
+        if (!hash || seen.has(hash)) continue;
+        seen.add(hash);
+        if (remainingSkip > 0) { remainingSkip--; continue; }
+        lines.push(record);
+        remaining--;
+        if (remaining === 0) break;
+      }
+      // A full page means this name still has older commits. The rename, if any, is further down.
+      if (records.length >= need || remaining === 0) break;
+      const oldest = records[records.length - 1].split('\x00');
+      const parent = (oldest[2] ?? '').split(' ')[0];
+      const previous = parent ? await this.renamedFrom(oldest[0], currentPath) : null;
+      if (!previous || previous === currentPath) break;
+      currentRev = parent;
+      currentPath = previous;
+    }
+    return lines.join('\n');
+  }
+
+  /** Previous path when `hash` renamed a file to `path`. Empty when that commit did not. */
+  private async renamedFrom(hash: string, path: string): Promise<string | null> {
+    let raw = '';
+    try {
+      raw = await this.git.raw(['show', '-z', '-M', '--name-status', '--format=', hash]);
+    } catch { return null; }
+    const want = path.replace(/\\/g, '/');
+    const parts = raw.split('\0');
+    for (let i = 0; i < parts.length; i++) {
+      const status = parts[i];
+      if (/^R\d+$/.test(status)) {
+        const previous = (parts[i + 1] ?? '').replace(/\\/g, '/');
+        const next = (parts[i + 2] ?? '').replace(/\\/g, '/');
+        if (next === want && previous) return previous;
+        i += 2;
+      } else if (/^[AMDTUX]$/.test(status)) {
+        i += 1;
+      }
+    }
+    return null;
+  }
+
   /** Number of commits only on `target` and only on `base`, whatever the compare's mode. */
   async countCompareSides(compare: CompareRange): Promise<CompareCounts> {
     await this.verifyCompareRefs(compare);
@@ -847,7 +924,7 @@ export class GitService {
   }
 
   // Log uses raw git format for graph rendering — VS Code API's log() lacks graph parents/refs.
-  async getLog(limit: number, skip: number, opts?: { filterText?: string; filterAuthor?: string; filterBranch?: string; filterDateFrom?: string; filterDateTo?: string; compare?: CompareRange; worktreeServices?: GitService[] }): Promise<CommitNode[]> {
+  async getLog(limit: number, skip: number, opts?: { filterText?: string; filterAuthor?: string; filterBranch?: string; filterDateFrom?: string; filterDateTo?: string; filterPath?: string; filterFollow?: boolean; compare?: CompareRange; worktreeServices?: GitService[] }): Promise<CommitNode[]> {
     // A compare ref missing from this repo throws here: the caller's allSettled drops this repo, not the whole log
     if (opts?.compare) await this.verifyCompareRefs(opts.compare);
     const bothSides = opts?.compare?.mode === 'both';
@@ -867,29 +944,48 @@ export class GitService {
       // Not paginated: a hash prefix matches a handful of commits at most.
       commits = await this.findCommitsByHashPrefix(opts!.filterText!.trim().toLowerCase(), [...format, ...filterArgs], opts?.compare);
     } else {
-      const args: string[] = [
+      const logPrefix: string[] = [
         'log',
         // --date-order, not --topo-order: the log renders in committer-date order (see
         // getInterleavedLog), and asking git for a different order than the one displayed
         // meant a page's contents depended on where its boundaries fell. Date order is
         // still topological — a commit never precedes its own parent.
         '--date-order',
-        `--max-count=${limit}`, `--skip=${skip}`,
         ...logFormat,
       ];
-      if (opts?.filterText) args.push(`--grep=${opts.filterText}`, '--regexp-ignore-case');
-      args.push(...filterArgs);
-      if (opts?.compare) {
+      if (opts?.filterText) logPrefix.push(`--grep=${opts.filterText}`, '--regexp-ignore-case');
+      logPrefix.push(...filterArgs);
+      const revs = opts?.compare
         // Compare mode replaces the branch filter
-        args.push(...compareRangeArgs(opts.compare));
-      } else if (opts?.filterBranch) {
-        args.push(opts.filterBranch);
+        ? compareRangeArgs(opts.compare)
+        : opts?.filterBranch
+          ? [opts.filterBranch]
+          : ['--exclude=refs/stash', '--all'];
+      const spec = opts?.filterPath ? (opts.filterPath.replace(/\\/g, '/').replace(/\/+$/, '') || '.') : '';
+      const singleRev = revs.length === 1 && !revs[0].startsWith('-') ? revs[0] : '';
+      const pathArgs = spec && spec !== '.' ? ['--', pathspecArg(spec)] : [];
+      // A file on one branch is stitched across renames. --follow drops commits around
+      // merges, which is the gap against WebStorm. A directory, a compare, or every
+      // branch stays one path walk.
+      let raw: string;
+      if (pathArgs.length > 0 && opts?.filterFollow && singleRev) {
+        raw = await this.cachedByRefs(
+          `file-history:${JSON.stringify(logPrefix)}:${singleRev}:${spec}:${limit}:${skip}`,
+          () => this.fileHistoryAcrossRenames(logPrefix, singleRev, spec, limit, skip),
+          fingerprint,
+        );
       } else {
-        args.push('--exclude=refs/stash', '--all');
+        const args = [
+          ...logPrefix,
+          `--max-count=${limit}`,
+          `--skip=${skip}`,
+          ...revs,
+          ...(pathArgs.length > 0 && opts?.filterFollow ? ['--follow'] : []),
+          ...pathArgs,
+        ];
+        raw = await this.cachedByRefs(`log:${JSON.stringify(args)}`, () => this.git.raw(args), fingerprint);
       }
-      // The same query on unchanged refs gives the same commits: a refresh caused by
-      // another repo, or a page re-requested, doesn't need to run git log again here.
-      commits = this._parseLogOutput(await this.cachedByRefs(`log:${JSON.stringify(args)}`, () => this.git.raw(args), fingerprint));
+      commits = this._parseLogOutput(raw);
     }
 
     // Mark unpushed commits: hashes ahead of the remote tracking branch.
@@ -1012,23 +1108,34 @@ export class GitService {
     return result;
   }
 
-  async getCommitFiles(hash: string, knownParents?: string[]): Promise<Array<{ path: string; status: string; added?: number; removed?: number; oldPath?: string }>> {
+  async getCommitFiles(hash: string, knownParents?: string[], pathFilter?: { path?: string; follow?: boolean }): Promise<Array<{ path: string; status: string; added?: number; removed?: number; oldPath?: string }>> {
     // For merge commits, diff-tree uses combined diff and omits most files.
     // Diff against first parent instead to get the full file list.
-    let parents = knownParents;
-    if (!parents) {
-      const raw = await this.git.raw(['log', '-1', '--format=%P', hash]).catch(() => '');
-      parents = raw.trim().split(' ').filter(Boolean);
+    const spec = commitPathspec(pathFilter?.path);
+    let baseArgs: string[];
+    let numArgs: string[];
+    // `--follow` resolves the name this file had in this commit. A plain pathspec
+    // only matches the current path, so a renamed file would disappear.
+    if (spec.length > 0 && pathFilter?.follow) {
+      baseArgs = ['log', '-1', '--follow', '--name-status', '--format=', hash, ...spec];
+      numArgs = ['log', '-1', '--follow', '--numstat', '--format=', hash, ...spec];
+    } else {
+      let parents = knownParents;
+      if (!parents) {
+        const raw = await this.git.raw(['log', '-1', '--format=%P', hash]).catch(() => '');
+        parents = raw.trim().split(' ').filter(Boolean);
+      }
+      const isMerge = parents.length >= 2;
+      const isRoot  = parents.length === 0;
+      baseArgs = isMerge
+        ? ['diff', '--name-status', parents[0], hash]
+        : ['diff-tree', '--no-commit-id', '-r', '--name-status', ...(isRoot ? ['--root'] : []), hash];
+      numArgs = isMerge
+        ? ['diff', '--numstat', parents[0], hash]
+        : ['diff-tree', '--no-commit-id', '-r', '--numstat', ...(isRoot ? ['--root'] : []), hash];
+      baseArgs.push(...spec);
+      numArgs.push(...spec);
     }
-    const isMerge = parents.length >= 2;
-    const isRoot  = parents.length === 0;
-
-    const baseArgs = isMerge
-      ? ['diff', '--name-status', parents[0], hash]
-      : ['diff-tree', '--no-commit-id', '-r', '--name-status', ...(isRoot ? ['--root'] : []), hash];
-    const numArgs = isMerge
-      ? ['diff', '--numstat', parents[0], hash]
-      : ['diff-tree', '--no-commit-id', '-r', '--numstat', ...(isRoot ? ['--root'] : []), hash];
 
     const [nameStatus, numStat] = await Promise.all([
       this.git.raw(baseArgs),
@@ -1058,48 +1165,6 @@ export class GitService {
       files.push({ status: statusCode, path: filePath, added: s?.added, removed: s?.removed, ...(oldPath ? { oldPath } : {}) });
     }
     return files;
-  }
-
-  async getFileHistory(filePath: string, limit = 2000): Promise<Array<{
-    hash: string; shortHash: string; message: string;
-    authorName: string; authorEmail: string; authorDate: string;
-    status: string; oldPath?: string;
-  }>> {
-    const args = [
-      'log', '--follow', `--max-count=${limit}`,
-      '--format=%H%x00%h%x00%an%x00%ae%x00%ai%x00%s',
-      '--name-status', '--diff-filter=ACDMRT', '--abbrev=8',
-      '--', filePath,
-    ];
-    const raw = await this.git.raw(args).catch(() => '');
-    const results: Array<{
-      hash: string; shortHash: string; message: string;
-      authorName: string; authorEmail: string; authorDate: string;
-      status: string; oldPath?: string;
-    }> = [];
-    let current: { hash: string; shortHash: string; message: string; authorName: string; authorEmail: string; authorDate: string } | null = null;
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      if (line.includes('\x00')) {
-        const parts = line.split('\x00');
-        if (parts.length >= 6) {
-          current = { hash: parts[0], shortHash: parts[1], authorName: parts[2], authorEmail: parts[3], authorDate: parts[4], message: parts[5] };
-        }
-        continue;
-      }
-      if (current && /^[ACDMRT]/.test(line)) {
-        const cols = line.split('\t');
-        const statusCode = cols[0][0];
-        const isRename = (statusCode === 'R' || statusCode === 'C') && cols.length >= 3;
-        results.push({
-          ...current,
-          status: statusCode,
-          ...(isRename ? { oldPath: cols[1] } : {}),
-        });
-        current = null;
-      }
-    }
-    return results;
   }
 
   async gitObjectExists(ref: string, filePath: string): Promise<boolean> {

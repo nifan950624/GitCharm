@@ -75,7 +75,7 @@
   "command.logHideBranchSidebar.title": "Ocultar barra lateral de ramas",
   "command.logShowBranchSidebar.title": "Mostrar barra lateral de ramas",
   "command.setGitLogDefaultLocation.title": "Establecer ubicación predeterminada del Log",
-  "command.showFileHistory.title": "Mostrar historial del archivo",
+  "command.showFileHistory.title": "Mostrar historial",
   "command.compareWith.title": "Comparar con…",
   "color.statusBarPullForeground.description": "Color del texto de la barra de estado cuando hay commits entrantes disponibles (se necesita un pull)",
   "color.statusBarPushForeground.description": "Color del texto de la barra de estado cuando hay commits sin enviar o la rama no está en el remoto",

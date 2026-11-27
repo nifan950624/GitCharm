@@ -1370,7 +1370,7 @@ export class WorkspaceGitManager implements vscode.Disposable {
     return branches;
   }
 
-  async getInterleavedLog(repoIds: string[], limit: number, skip: number, opts?: { filterText?: string; filterAuthor?: string; filterBranch?: string; filterDateFrom?: string; filterDateTo?: string; compareByRepo?: Record<string, CompareRange> }): Promise<CommitNode[]> {
+  async getInterleavedLog(repoIds: string[], limit: number, skip: number, opts?: { filterText?: string; filterAuthor?: string; filterBranch?: string; filterDateFrom?: string; filterDateTo?: string; filterPath?: string; filterFollow?: boolean; compareByRepo?: Record<string, CompareRange> }): Promise<CommitNode[]> {
     const { compareByRepo, ...logOpts }: NonNullable<typeof opts> = opts ?? {};
     const requested = repoIds.length > 0
       ? repoIds.map(id => this.repos.get(id)).filter(Boolean) as GitService[]

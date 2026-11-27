@@ -27,6 +27,7 @@ interface Props {
   onGetFromBranch: (file: WorkingTreeDiffFile) => void;
   onShowDirDiff: (dirPath: string, files: WorkingTreeDiffFile[]) => void;
   onGetDirFromBranch: (dirPath: string, files: WorkingTreeDiffFile[]) => void;
+  onShowHistory: (repoId: string, path: string, directory: boolean) => void;
   onRefresh: () => void;
   onClose: () => void;
 }
@@ -48,7 +49,7 @@ function statusColor(status: string): string {
   return STATUS_COLORS[status] ?? 'var(--vscode-foreground)';
 }
 
-export function WorkingTreeBranchDiff({ label, groups, repos, iconTheme, onShowDiff, onGetFromBranch, onShowDirDiff, onGetDirFromBranch, onRefresh, onClose }: Props) {
+export function WorkingTreeBranchDiff({ label, groups, repos, iconTheme, onShowDiff, onGetFromBranch, onShowDirDiff, onGetDirFromBranch, onShowHistory, onRefresh, onClose }: Props) {
   const [dirOverrides, setDirOverrides] = useState<Set<string>>(new Set());
   const [allExpanded, setAllExpanded] = useState<boolean | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -171,18 +172,23 @@ export function WorkingTreeBranchDiff({ label, groups, repos, iconTheme, onShowD
             if (menu.kind === 'file') { setMenu(null); onGetFromBranch(menu.file); }
             else { setMenu(null); onGetDirFromBranch(menu.dirPath, menu.files); }
           }}
+          onShowHistory={() => {
+            if (menu.kind === 'file') { setMenu(null); onShowHistory(menu.file.repoId, menu.file.path, false); }
+            else { setMenu(null); onShowHistory(menu.repoId, menu.dirPath, true); }
+          }}
         />
       )}
     </div>
   );
 }
 
-function FileMenu({ x, y, onClose, onShowDiff, onGetFromBranch }: {
+function FileMenu({ x, y, onClose, onShowDiff, onGetFromBranch, onShowHistory }: {
   x: number;
   y: number;
   onClose: () => void;
   onShowDiff: () => void;
   onGetFromBranch: () => void;
+  onShowHistory: () => void;
 }) {
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -220,6 +226,7 @@ function FileMenu({ x, y, onClose, onShowDiff, onGetFromBranch }: {
   return (
     <div style={{ ...styles.menu, left, top }} onMouseDown={event => event.stopPropagation()} onContextMenu={event => event.preventDefault()}>
       {item(l10n.t('Show Diff'), 'diff', onShowDiff)}
+      {item(l10n.t('Show History'), 'history', onShowHistory)}
       <div style={styles.menuSep} />
       {item(l10n.t('Get from Branch'), 'cloud-download', onGetFromBranch)}
     </div>

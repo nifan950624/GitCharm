@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { getWebviewHtml } from '../utils/webviewHtml';
 import { attachAvatarResolver } from '../utils/avatarResolver';
-import { EMPTY_TREE, openSmartDiff } from './GitLogPanelProvider';
+import { openSmartDiff } from './GitLogPanelProvider';
 import type { WorkspaceGitManager } from '../git/WorkspaceGitManager';
 import { loadIconTheme } from '../utils/IconThemeService';
 import { pickRefQuickPick } from '../utils/refPicker';
@@ -224,7 +224,7 @@ async function handleMessage(
   switch (msg.type) {
     case 'LOG_REQUEST_COMMIT_FILES': {
       try {
-        const requestedFiles = await repo.getCommitFiles(msg.hash, msg.parents);
+        const requestedFiles = await repo.getCommitFiles(msg.hash, msg.parents, msg.filterPath ? { path: msg.filterPath, follow: !!msg.filterFollow } : undefined);
         post({ type: 'LOG_COMMIT_FILES', requestId: msg.requestId, files: requestedFiles });
       } catch (e: unknown) {
         logError('commitFullDetail:commitFiles', formatGitError(e), getRawErrorDetail(e));
@@ -282,7 +282,7 @@ async function handleMessage(
     }
 
     case 'LOG_SHOW_FILE_HISTORY': {
-      await vscode.commands.executeCommand('gitcharm.showFileHistory', vscode.Uri.file(path.join(repo.rootPath, msg.filePath)));
+      await vscode.commands.executeCommand('gitcharm.showFileHistory', vscode.Uri.file(path.join(repo.rootPath, msg.filePath)), msg.directory);
       return;
     }
 
@@ -351,26 +351,6 @@ async function handleMessage(
         gitUri(refHash, msg.filePath),
         vscode.l10n.t('{0} ({1} vs {2})', msg.filePath, shortHash, pickedRef),
       );
-      return;
-    }
-
-    case 'LOG_OPEN_COMMIT_CHANGES': {
-      const commitFiles = await repo.getCommitFiles(msg.hash);
-      const rootPath = repo.rootPath;
-      const parentHash = (await repo.getParents(msg.hash))[0] ?? EMPTY_TREE;
-      const gitUri = (ref: string, filePath: string): vscode.Uri => {
-        const fileUri = vscode.Uri.file(path.join(rootPath, filePath));
-        return vscode.Uri.from({ scheme: 'git', path: fileUri.path, query: JSON.stringify({ path: fileUri.fsPath, ref }) });
-      };
-      const resources = commitFiles
-        .filter(f => f.status !== 'U')
-        .map(f => {
-          const label = vscode.Uri.file(path.join(rootPath, f.path));
-          const original = gitUri(f.status === 'A' ? EMPTY_TREE : parentHash, f.oldPath ?? f.path);
-          const modified = gitUri(f.status === 'D' ? EMPTY_TREE : msg.hash, f.path);
-          return [label, original, modified] as [vscode.Uri, vscode.Uri, vscode.Uri];
-        });
-      await vscode.commands.executeCommand('vscode.changes', vscode.l10n.t('Changes in {0}', msg.hash.slice(0, 8)), resources);
       return;
     }
 

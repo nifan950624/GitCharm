@@ -297,7 +297,7 @@ export type CommitToHostMsg =
   | { type: 'NOTIFY_INFO'; message: string }
   | { type: 'COMMIT_REVEAL_IN_EXPLORER'; repoId: string; filePath: string }
   | { type: 'COMMIT_REVEAL_IN_OS'; repoId: string; filePath: string }
-  | { type: 'COMMIT_SHOW_FILE_HISTORY'; repoId: string; filePath: string }
+  | { type: 'COMMIT_SHOW_FILE_HISTORY'; repoId: string; filePath: string; directory?: boolean }
   | { type: 'COMMIT_COMPARE_FILE_WITH'; repoId: string; filePath: string }
   | { type: 'COMMIT_COMPARE_FOLDER_WITH'; repoId: string; folderPath: string }
   | { type: 'WORKTREE_REQUEST_LIST' }
@@ -408,6 +408,8 @@ export type HostToLogMsg =
   | { type: 'LOG_SCROLL_TO_COMMIT'; hash: string; repoId: string }
   | { type: 'LOG_COMMIT_BODY_RESULT'; requestId: string; hasBody: boolean }
   | { type: 'LOG_FILTER_BY_REPO'; repoId: string | null; branch?: string | null }
+  /** Show the log for one file (`follow`) or directory inside a repository. */
+  | { type: 'LOG_SHOW_PATH_HISTORY'; repoId: string; path: string; follow: boolean }
   | { type: 'LOG_STASHES_BATCH'; stashCommits: CommitNode[]; queriedRepoIds: string[] }
   /** Uncommitted changes of every repo in the log, replacing the previous report. Empty when the setting is off. */
   | { type: 'LOG_WORKING_TREE_STATUS'; repos: LogWorkingTreeStatus[] }
@@ -417,8 +419,8 @@ export type HostToLogMsg =
 // ─── Log Panel: WebView → Host ─────────────────────────────────────────────────
 
 export type LogToHostMsg =
-  | { type: 'LOG_REQUEST_COMMITS'; repoIds: string[]; limit: number; skip: number; requestId?: string; filterText?: string; filterAuthor?: string; filterBranch?: string; filterDateFrom?: string; filterDateTo?: string; compare?: CompareRange }
-  | { type: 'LOG_REQUEST_COMMIT_FILES'; requestId: string; repoId: string; hash: string; parents?: string[] }
+  | { type: 'LOG_REQUEST_COMMITS'; repoIds: string[]; limit: number; skip: number; requestId?: string; filterText?: string; filterAuthor?: string; filterBranch?: string; filterDateFrom?: string; filterDateTo?: string; filterPath?: string; filterFollow?: boolean; compare?: CompareRange }
+  | { type: 'LOG_REQUEST_COMMIT_FILES'; requestId: string; repoId: string; hash: string; parents?: string[]; filterPath?: string; filterFollow?: boolean }
   | { type: 'LOG_REQUEST_RANGE_FILES'; requestId: string; groups: CommitSelectionGroup[]; mode: CommitSelectionMode }
   | { type: 'LOG_REQUEST_FILE_DIFF'; requestId: string; repoId: string; hash: string; filePath: string }
   | { type: 'LOG_OPEN_FILE_DIFF'; repoId: string; hash: string; filePath: string; fileStatus?: string; oldPath?: string; parents?: string[]; combined?: boolean }
@@ -476,16 +478,13 @@ export type LogToHostMsg =
   | { type: 'LOG_CHECKOUT_COMMIT'; requestId: string; repoId: string; hash: string; branchName?: string }
   | { type: 'LOG_REVEAL_IN_EXPLORER'; repoId: string; filePath: string }
   | { type: 'LOG_REVEAL_IN_OS'; repoId: string; filePath: string }
-  | { type: 'LOG_SHOW_FILE_HISTORY'; repoId: string; filePath: string }
+  | { type: 'LOG_SHOW_FILE_HISTORY'; repoId: string; filePath: string; directory?: boolean }
   | { type: 'LOG_INIT_REPO' }
   | { type: 'LOG_OPEN_FOLDER' }
   | { type: 'LOG_CLONE_REPO' }
   | { type: 'LOG_OPEN_EXTENDED_DETAIL'; repoId: string; hash: string }
-  | { type: 'LOG_OPEN_COMMIT_CHANGES'; repoId: string; hash: string }
   /** Diff of one uncommitted file, HEAD ↔ working tree. */
   | { type: 'LOG_OPEN_WORKING_TREE_FILE_DIFF'; repoId: string; filePath: string; fileStatus: string; oldPath?: string }
-  /** Multi-file diff of every uncommitted change, HEAD ↔ working tree. */
-  | { type: 'LOG_OPEN_WORKING_TREE_CHANGES'; repoId: string }
   /** Opens the working-tree comparison for the selected branch in an editor tab. */
   | { type: 'LOG_DIFF_WITH_WORKING_TREE'; label: string; refs: { repoId: string; ref: string }[] }
   | { type: 'LOG_SHOW_IN_COMMIT_PANEL' }

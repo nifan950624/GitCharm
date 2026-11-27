@@ -66,6 +66,14 @@ export function CommitFiltersBar({ filters, branches, tags, repos, onFilterChang
           debounceMs={600}
         />
 
+        <DebouncedInput
+          value={filters.path}
+          placeholder={l10n.t('Path…')}
+          icon="file"
+          onChange={v => onFilterChange('path', v)}
+          debounceMs={600}
+        />
+
         {/* Branch / Tag — or, in compare mode, the two compared refs */}
         {filters.compare ? (
           <CompareControls

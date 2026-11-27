@@ -19,6 +19,7 @@ import { commitRevision, selectionGroups } from './utils/commitSelection';
 import type { CommitSelection } from './utils/commitSelection';
 import type { LogToHostMsg, HostToLogMsg, CompareRange, LogLayoutByLocation, LogViewLocation, CommitSelectionMode, RangeFileEntry, LogColumns } from '../../host/types/messages';
 import type { CommitNode } from '../shared/types';
+import { fileMatchesPath } from './utils/pathFilter';
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -66,6 +67,9 @@ function App() {
   const [rangeFiles, setRangeFiles] = useState<RangeFileEntry[]>([]);
   const [loadingRangeFiles, setLoadingRangeFiles] = useState(false);
   const rangeRequestKeyRef = useRef('');
+  // Path the current commitFiles were loaded for. A followed file can come back under
+  // its old name, which an exact match against the current path would hide.
+  const commitFileScopeRef = useRef<{ path: string; follow: boolean } | null>(null);
 
   useEffect(() => {
     const obs = new MutationObserver(() => setThemeVersion(v => v + 1));
@@ -75,6 +79,7 @@ function App() {
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadRef = useRef<() => void>(() => {});
   const filterRepoRef = useRef<(repoId: string | null, branch?: string | null) => void>(() => {});
+  const showHistoryRef = useRef<(repoId: string, path: string, follow: boolean) => void>(() => {});
   const clearFiltersRef = useRef<() => void>(() => {});
   const setCompareModeRef = useRef<(active: boolean) => void>(() => {});
   // Prevents concurrent requests
@@ -214,6 +219,9 @@ function App() {
         case 'LOG_FILTER_BY_REPO':
           filterRepoRef.current(msg.repoId, msg.branch ?? null);
           break;
+        case 'LOG_SHOW_PATH_HISTORY':
+          showHistoryRef.current(msg.repoId, msg.path, msg.follow);
+          break;
         case 'LOG_STASHES_BATCH':
           store.setStashes(msg.stashCommits, msg.queriedRepoIds);
           break;
@@ -269,6 +277,8 @@ function App() {
       filterAuthor: f.author || undefined,
       // Compare mode names its own refs, so the branch filter is not sent alongside it
       filterBranch: f.compare ? undefined : (f.branch || undefined),
+      filterPath: f.path || undefined,
+      filterFollow: f.path && f.pathFollow ? true : undefined,
       compare: f.compare ?? undefined,
       // git --after and --before are exclusive; use time suffixes to make the range fully inclusive
       filterDateFrom: f.dateFrom ? `${f.dateFrom}T00:00:00` : undefined,
@@ -316,33 +326,77 @@ function App() {
     loadMore();
   }, [loadMore]);
 
-  // When a commit is selected, load its files
+  // When a commit is selected, load its files. The path filter limits that list too.
   useEffect(() => {
-    const { selectedCommit } = store;
+    const selectedCommit = useLogStore.getState().selectedCommit;
     if (!selectedCommit) return;
+    const { path, pathFollow } = useLogStore.getState().commitFilters;
+    const apply = (files: Array<{ path: string; status: string; added?: number; removed?: number; oldPath?: string }>) => {
+      const matched = path ? files.filter(file => fileMatchesPath(path, pathFollow, file)) : files;
+      commitFileScopeRef.current = { path, follow: pathFollow };
+      useLogStore.getState().setCommitFiles(matched);
+    };
     // Stash entries already carry their file list — no network request needed
     if (selectedCommit.isStash) {
-      store.setCommitFiles(selectedCommit.stashFiles ?? []);
+      apply(selectedCommit.stashFiles ?? []);
       return;
     }
     // So does the working-tree row: its files come with every status update
     if (selectedCommit.isWorkingTree) {
-      store.setCommitFiles(useLogStore.getState().workingTree[selectedCommit.repoId] ?? []);
+      apply(useLogStore.getState().workingTree[selectedCommit.repoId] ?? []);
       return;
     }
-    store.setLoadingFiles(true);
+    // Selecting a commit clears the list. Drop the previous commit's scope with it,
+    // or the next path would be treated as already loaded.
+    const loaded = useLogStore.getState().commitFiles;
+    if (loaded.length === 0) commitFileScopeRef.current = null;
+    const scope = commitFileScopeRef.current;
+    // A whole-commit list can be narrowed in the view. A list already limited to
+    // another path, or a followed rename, has to be asked for again.
+    const alreadyForThisPath = !!scope && scope.path === path && scope.follow === pathFollow;
+    const loadedFor = scope?.path ?? '';
+    // The loaded list is complete for this path when it covers the whole commit, or a parent directory.
+    const canNarrowLocally = !pathFollow && !scope?.follow && loaded.length > 0 && (
+      loadedFor === '' || path === loadedFor || path.startsWith(`${loadedFor}/`)
+    );
+    if (!alreadyForThisPath && !canNarrowLocally) useLogStore.getState().setLoadingFiles(true);
     const reqId = generateId();
+    const hash = selectedCommit.hash;
+    const repoId = selectedCommit.repoId;
     pendingRef.current.set(reqId, (msg) => {
-      if (msg.type === 'LOG_COMMIT_FILES') store.setCommitFiles(msg.files);
+      if (msg.type !== 'LOG_COMMIT_FILES') return;
+      const live = useLogStore.getState();
+      const liveCommit = live.selectedCommit;
+      if (!liveCommit || liveCommit.hash !== hash || liveCommit.repoId !== repoId) return;
+      if ((live.commitFilters.path || '') !== path || live.commitFilters.pathFollow !== pathFollow) return;
+      commitFileScopeRef.current = { path, follow: pathFollow };
+      live.setCommitFiles(msg.files);
     });
     getVsCodeApi().postMessage({
       type: 'LOG_REQUEST_COMMIT_FILES',
       requestId: reqId,
-      repoId: selectedCommit.repoId,
-      hash: selectedCommit.hash,
+      repoId,
+      hash,
       parents: selectedCommit.parents,
+      ...(path ? { filterPath: path, ...(pathFollow ? { filterFollow: true } : {}) } : {}),
     } satisfies LogToHostMsg);
-  }, [store.fileLoadSeq]);
+  }, [store.fileLoadSeq, store.commitFilters.path, store.commitFilters.pathFollow]);
+
+  const pathFilter = store.commitFilters.path;
+  const pathFollow = store.commitFilters.pathFollow;
+  const detailFiles = useMemo(() => {
+    if (commitSelection) return pathFilter ? rangeFiles.filter(file => fileMatchesPath(pathFilter, pathFollow, file)) : rangeFiles;
+    const scope = commitFileScopeRef.current;
+    if (!pathFilter || (scope?.path === pathFilter && scope.follow === pathFollow)) return store.commitFiles;
+    return store.commitFiles.filter(file => fileMatchesPath(pathFilter, pathFollow, file));
+  }, [commitSelection, rangeFiles, store.commitFiles, pathFilter, pathFollow]);
+
+  useEffect(() => {
+    const selected = store.selectedFile;
+    if (!pathFilter || !selected) return;
+    if (detailFiles.some(file => file.path === selected.path)) return;
+    useLogStore.getState().selectFile(null);
+  }, [detailFiles, pathFilter, store.selectedFile]);
 
   const repoColors = useMemo(() => {
     const map: Record<string, string> = {};
@@ -358,7 +412,8 @@ function App() {
     store.commitFilters.author ||
     store.commitFilters.dateFrom ||
     store.commitFilters.dateTo ||
-    (compare ? compare.base || compare.target : store.commitFilters.branch)
+    (compare ? compare.base || compare.target : store.commitFilters.branch) ||
+    store.commitFilters.path
   );
 
   // Labels describe the repos actually in view: the filtered repo, or all of them
@@ -410,7 +465,7 @@ function App() {
   // Merge stashes into the commit list, filtering by branch if a branch filter is active
   const commitsWithStashes = useMemo(() => {
     // Stashes loaded before compare mode was turned on stay in the store; don't show them
-    if (store.commitFilters.compare) return store.commits;
+    if (store.commitFilters.compare || store.commitFilters.path) return store.commits;
     const branchFilter = store.commitFilters.branch;
     const visibleStashes = branchFilter
       ? store.stashes.filter(s => s.stashBranch === branchFilter)
@@ -420,7 +475,7 @@ function App() {
     // git's topological order, which the graph layout depends on.
     const stashesNewestFirst = [...visibleStashes].sort((a, b) => new Date(b.committerDate).getTime() - new Date(a.committerDate).getTime());
     return mergeCommitLists([store.commits, stashesNewestFirst]);
-  }, [store.commits, store.stashes, store.commitFilters.branch, store.commitFilters.compare]);
+  }, [store.commits, store.stashes, store.commitFilters.branch, store.commitFilters.compare, store.commitFilters.path]);
 
   // One "Uncommitted Changes" row per repo with changes, on top of its HEAD. It stands for
   // the checked-out branch's next commit, so views that don't show that branch as it is
@@ -435,7 +490,15 @@ function App() {
       .filter(([repoId]) => visibleRepoIds.has(repoId)
         && (!f.repoId || f.repoId === repoId)
         && (!f.branch || f.branch === currentBranchByRepo[repoId]))
-      .map(([repoId, files]) => workingTreeRow(repoId, files.length, headHashByRepo[repoId], currentBranchByRepo[repoId], store.activeProfile));
+      .map(([repoId, files]) => {
+        const matched = f.path
+          ? files.filter(file => fileMatchesPath(f.path, f.pathFollow, file))
+          : files;
+        return matched.length > 0
+          ? workingTreeRow(repoId, matched.length, headHashByRepo[repoId], currentBranchByRepo[repoId], store.activeProfile)
+          : null;
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
   }, [store.workingTree, store.commitFilters, store.commits.length, store.hasMore, store.repos, currentBranchByRepo, headHashByRepo, store.activeProfile]);
 
   const graphCommits = useMemo(
@@ -474,9 +537,13 @@ function App() {
   // text/author are debounced inside DebouncedInput; branch/date/repo fire immediately
   const handleFilterChange = useCallback((key: keyof import('./store/logStore').CommitFilters, value: string) => {
     // Picking a branch (from the sidebar or the branch picker) means "show this branch", so it ends compare mode
-    const update = key === 'branch' ? { branch: value, compare: null } : { [key]: value };
+    const update = key === 'branch'
+      ? { branch: value, compare: null }
+      : key === 'path'
+        ? { path: value, pathFollow: false }
+        : { [key]: value };
     store.setCommitFilters(update);
-    if (key === 'text' || key === 'author') {
+    if (key === 'text' || key === 'author' || key === 'path') {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
       searchDebounceRef.current = setTimeout(() => reloadCommits(update), 0);
     } else {
@@ -509,6 +576,16 @@ function App() {
     reloadCommits(filters);
   };
 
+  showHistoryRef.current = (repoId: string, path: string, follow: boolean) => {
+    // File and directory history is the current checkout, not every branch.
+    const head = useLogStore.getState().branches.find(b => b.repoId === repoId && b.isHead && !b.isRemote);
+    if (useLogStore.getState().commitFilters.compare) store.setCompareCounts(null);
+    const update = { repoId, path, pathFollow: follow, branch: head?.name || 'HEAD', compare: null };
+    store.setCommitFilters(update);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    reloadCommits(update);
+  };
+
   // Compare toggle from the title bar: entering starts from the defaults (HEAD not in the default branch)
   setCompareModeRef.current = (active: boolean) => {
     if (active === !!useLogStore.getState().commitFilters.compare) return;
@@ -520,8 +597,8 @@ function App() {
   clearFiltersRef.current = () => {
     const current = useLogStore.getState().commitFilters.compare;
     const cleared = current
-      ? { text: '', author: '', dateFrom: '', dateTo: '', compare: { base: '', target: '', mode: current.mode } }
-      : { text: '', author: '', branch: '', dateFrom: '', dateTo: '' };
+      ? { text: '', author: '', path: '', pathFollow: false, dateFrom: '', dateTo: '', compare: { base: '', target: '', mode: current.mode } }
+      : { text: '', author: '', path: '', pathFollow: false, branch: '', dateFrom: '', dateTo: '' };
     if (current && (current.base || current.target)) store.setCompareCounts(null);
     store.setCommitFilters(cleared);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -718,7 +795,9 @@ function App() {
             onScrollTargetHandled={() => store.setPendingScrollTarget(null)}
             themeVersion={themeVersion}
             activeProfile={store.activeProfile}
-            emptyState={compareEmptyState}
+            emptyState={compareEmptyState ?? (store.commitFilters.path
+              ? { title: l10n.t('No commits found for this path') }
+              : undefined)}
             compareSideLabels={compareSideLabels}
             commitLimitReached={store.hasMore ? null : store.commitLimitReached}
             hideDate={viewLocation === 'sideBar'}
@@ -735,7 +814,8 @@ function App() {
               commit={newestSelected ?? store.selectedCommit}
               selection={commitSelection ?? undefined}
               onSelectionModeChange={canCompareSnapshots ? setSelectionMode : undefined}
-              files={commitSelection ? rangeFiles : store.commitFiles}
+              files={detailFiles}
+              pathFilter={pathFilter ? { path: pathFilter, follow: pathFollow } : undefined}
               selectedFile={store.selectedFile}
               loadingFiles={commitSelection ? loadingRangeFiles : store.loadingFiles}
               repoColor={selectedRepoColor}

@@ -164,6 +164,7 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
   private dockedLocation: LogViewLocation = 'panel';
   private pendingFilterRepoId: string | null = null;
   private pendingFilterBranch: string | null = null;
+  private pendingHistory: { repoId: string; path: string; follow: boolean } | null = null;
   private pendingScrollHash: string | null = null;
   private pendingScrollRepoId: string | null = null;
   private cachedActiveProfile?: { name: string; gitName: string; gitEmail: string; builtIn?: 'local' | 'global' };
@@ -172,6 +173,7 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
   private pendingUndocked: {
     scroll?: { hash: string; repoId: string };
     filter?: { repoId: string; branch: string | null };
+    history?: { repoId: string; path: string; follow: boolean };
   } | null = null;
 
   setCommitPanel(provider: CommitPanelProvider): void {
@@ -481,6 +483,11 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
         // Small delay to let the webview finish its initial LOG_REQUEST_COMMITS round-trip
         setTimeout(() => this.post({ type: 'LOG_FILTER_BY_REPO', repoId, branch }), 150);
       }
+      if (this.pendingHistory) {
+        const history = this.pendingHistory;
+        this.pendingHistory = null;
+        setTimeout(() => this.post({ type: 'LOG_SHOW_PATH_HISTORY', ...history }), 150);
+      }
       if (this.pendingScrollHash !== null) {
         const hash = this.pendingScrollHash;
         const repoId = this.pendingScrollRepoId!;
@@ -543,6 +550,53 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
     }
     this.pendingScrollHash = hash;
     this.pendingScrollRepoId = repoId;
+  }
+
+  /** Reveal the Log Panel and limit it to commits that touched a file or directory. */
+  showPathHistory(repoId: string, filePath: string, follow: boolean): void {
+    const pathSpec = filePath.replace(/\\/g, '/').replace(/\/+$/, '') || '.';
+    const history = { repoId, path: pathSpec, follow: follow && pathSpec !== '.' };
+    const { target, wasOpen } = this.revealPreferred();
+    const location = target === 'undocked' ? 'panel' : this.dockedLocation;
+    if (this.getLayoutPrefs()[location].filtersHidden) void this.setLayoutPref('filtersHidden', false);
+    const msg: HostToLogMsg = { type: 'LOG_SHOW_PATH_HISTORY', ...history };
+
+    if (target === 'undocked') {
+      if (wasOpen) {
+        setTimeout(() => this.undockedPanel?.postToLog(msg), 150);
+      } else {
+        this.pendingUndocked = { ...this.pendingUndocked, history };
+      }
+      return;
+    }
+
+    if (wasOpen) {
+      setTimeout(() => this.post(msg), 150);
+      return;
+    }
+    this.pendingHistory = history;
+  }
+
+  /** Resolve a file or folder to its repo and show that path in the Log Panel. */
+  async showHistoryForUri(uri: vscode.Uri, directory?: boolean): Promise<void> {
+    const metas = this.manager.getRepoMetas();
+    const meta = metas.find(m => uri.fsPath === m.rootPath || uri.fsPath.startsWith(m.rootPath + path.sep))
+      ?? metas.find(m => uri.fsPath.startsWith(m.rootPath));
+    if (!meta) {
+      vscode.window.showErrorMessage(vscode.l10n.t('No git repository found for this file.'));
+      return;
+    }
+    const relPath = path.relative(meta.rootPath, uri.fsPath).replace(/\\/g, '/') || '.';
+    let isDirectory = directory === true;
+    if (directory !== true && directory !== false) {
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        isDirectory = (stat.type & vscode.FileType.Directory) !== 0;
+      } catch {
+        isDirectory = false;
+      }
+    }
+    this.showPathHistory(meta.id, relPath, !isDirectory);
   }
 
   /** Reveal the Log Panel and filter it to a specific repository (and optionally branch). */
@@ -819,6 +873,8 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
             filterBranch: msg.filterBranch,
             filterDateFrom: msg.filterDateFrom,
             filterDateTo: msg.filterDateTo,
+            filterPath: msg.filterPath,
+            filterFollow: msg.filterFollow,
             compareByRepo,
           })
           : [];
@@ -844,6 +900,9 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
             if (queued.scroll) {
               const { hash, repoId } = queued.scroll;
               this.undockedPanel?.postToLog({ type: 'LOG_SCROLL_TO_COMMIT', hash, repoId });
+            }
+            if (queued.history) {
+              this.undockedPanel?.postToLog({ type: 'LOG_SHOW_PATH_HISTORY', ...queued.history });
             }
           }, 150);
         }
@@ -895,7 +954,7 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
         const repo = this.manager.getRepo(msg.repoId);
         if (!repo) { post({ type: 'LOG_COMMIT_FILES', requestId: msg.requestId, files: [], error: 'Repo not found' }); return; }
         try {
-          const files = await repo.getCommitFiles(msg.hash, msg.parents);
+          const files = await repo.getCommitFiles(msg.hash, msg.parents, msg.filterPath ? { path: msg.filterPath, follow: !!msg.filterFollow } : undefined);
           post({ type: 'LOG_COMMIT_FILES', requestId: msg.requestId, files });
         } catch (e: unknown) {
           logError('commitFiles', formatGitError(e), getRawErrorDetail(e));
@@ -1001,7 +1060,7 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
       case 'LOG_SHOW_FILE_HISTORY': {
         const repo = this.manager.getRepo(msg.repoId);
         if (!repo) return;
-        await vscode.commands.executeCommand('gitcharm.showFileHistory', vscode.Uri.file(path.join(repo.rootPath, msg.filePath)));
+        await vscode.commands.executeCommand('gitcharm.showFileHistory', vscode.Uri.file(path.join(repo.rootPath, msg.filePath)), msg.directory);
         break;
       }
 
@@ -2366,28 +2425,6 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
         break;
       }
 
-      case 'LOG_OPEN_COMMIT_CHANGES': {
-        const repo = this.manager.getRepo(msg.repoId);
-        if (!repo) break;
-        const files = await repo.getCommitFiles(msg.hash);
-        const rootPath = repo.rootPath;
-        const parentHash = (await repo.getParents(msg.hash))[0] ?? EMPTY_TREE;
-        const gitUri = (ref: string, filePath: string): vscode.Uri => {
-          const fileUri = vscode.Uri.file(path.join(rootPath, filePath));
-          return vscode.Uri.from({ scheme: 'git', path: fileUri.path, query: JSON.stringify({ path: fileUri.fsPath, ref }) });
-        };
-        const resources = files
-          .filter(f => f.status !== 'U')
-          .map(f => {
-            const label = vscode.Uri.file(path.join(rootPath, f.path));
-            const original = gitUri(f.status === 'A' ? EMPTY_TREE : parentHash, f.oldPath ?? f.path);
-            const modified = gitUri(f.status === 'D' ? EMPTY_TREE : msg.hash, f.path);
-            return [label, original, modified] as [vscode.Uri, vscode.Uri, vscode.Uri];
-          });
-        await vscode.commands.executeCommand('vscode.changes', vscode.l10n.t('Changes in {0}', msg.hash.slice(0, 8)), resources);
-        break;
-      }
-
       case 'LOG_OPEN_WORKING_TREE_FILE_DIFF': {
         const repo = this.manager.getRepo(msg.repoId);
         if (!repo) break;
@@ -2408,24 +2445,6 @@ export class GitLogPanelProvider implements vscode.WebviewViewProvider, vscode.D
 
       case 'LOG_DIFF_WITH_WORKING_TREE': {
         await this.commitPanel?.showBranchDiff(msg.label, msg.refs);
-        break;
-      }
-
-      case 'LOG_OPEN_WORKING_TREE_CHANGES': {
-        const repo = this.manager.getRepo(msg.repoId);
-        if (!repo) break;
-        try {
-          const status = await repo.getStatus();
-          const files = mergeWorkingTreeFiles(status.stagedFiles, status.unstagedFiles);
-          if (files.length === 0) break;
-          const resources = files.map(f => {
-            const [original, modified] = workingTreeDiffUris(repo.rootPath, f);
-            return [vscode.Uri.file(path.join(repo.rootPath, f.path)), original, modified] as [vscode.Uri, vscode.Uri, vscode.Uri];
-          });
-          await vscode.commands.executeCommand('vscode.changes', vscode.l10n.t('Uncommitted Changes'), resources);
-        } catch (e: unknown) {
-          showGitError('openDiff', e);
-        }
         break;
       }
 
