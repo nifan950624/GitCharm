@@ -1690,8 +1690,6 @@
   "{0} (token)": "{0}（令牌）",
   "Enter the organization.": "请输入组织。",
   "Show commit graph": "显示提交图",
-  "Drag to resize the commit message. Double-click to fit the text.": "拖动调整提交说明的高度。双击则按文字高度收放。",
-  "Resize commit message": "调整提交说明高度",
   "Push rejected by the remote ({0}): {1}": "推送被远程拒绝（{0}）：{1}",
   "Push rejected by the remote ({0}).": "推送被远程拒绝（{0}）。",
   "Show Diff with Working Tree": "显示与工作树的差异",

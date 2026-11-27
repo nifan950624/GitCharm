@@ -23,6 +23,8 @@ import { IssuePanel, IssuesNoRemoteState, noIssueRepoHasRemote } from './compone
 import { getVsCodeApi } from '../shared/vscodeApi';
 import { Codicon } from '../shared/Codicon';
 import { ScrollArea } from '../shared/ScrollArea';
+import { useResize } from '../shared/useResize';
+import { ResizeHandle } from '../shared/ResizeHandle';
 import { handleTreeNavKeyDown } from '../shared/keyboardNav';
 import type { CommitToHostMsg, HostToCommitMsg, ShelveEntry, StashEntry, UnpushedCommit, WorktreeEntry, RepoPullRequests, ForgeProvider, PullRequestSummary, RepoIssues, IssueSummary } from '../shared/msgTypes';
 import type { CommitPanelConfig } from '../../host/types/messages';
@@ -260,6 +262,9 @@ type TabId = 'changes' | 'shelf' | 'stash' | 'push' | 'worktree' | 'pullrequests
 
 function App() {
   const store = useCommitStore();
+  const { panelRef: commitFormRef, onMouseDown: onCommitFormResize } = useResize({
+    id: 'commit.form', axis: 'y', side: 'after', initial: 220, min: 140,
+  });
   const pendingRef = useRef<Map<string, (msg: HostToCommitMsg) => void>>(new Map());
 
   // ── Tab ───────────────────────────────────────────────────────────────────
@@ -1736,7 +1741,7 @@ function App() {
         {activeTab === 'changes' && (<>
 
           {/* File list */}
-          <ScrollArea style={css.repoList} onKeyDown={(e) => handleTreeNavKeyDown(e, e.currentTarget)}>
+          <ScrollArea style={{ ...css.repoList, minHeight: 80 }} onKeyDown={(e) => handleTreeNavKeyDown(e, e.currentTarget)}>
             {hideReposWithoutChanges && changesRepos.length === 0 ? (
               <div style={css.filteredEmptyState}>
                 <Codicon name="filter" style={{ fontSize: '18px', opacity: 0.55 }} />
@@ -1985,7 +1990,8 @@ function App() {
             </div>
           )}
 
-          {/* Commit form */}
+          <ResizeHandle axis="y" onMouseDown={onCommitFormResize} />
+          <div ref={commitFormRef} style={css.commitFormPane}>
           <UnifiedCommitForm
             message={store.commitMessage}
             repoStatuses={changesRepos}
@@ -2053,6 +2059,7 @@ function App() {
               }
             }}
           />
+          </div>
 
         </>)}
 
@@ -2677,6 +2684,12 @@ const css = {
   } as React.CSSProperties,
   main: { display: 'flex', flexDirection: 'column' as const, flex: 1, overflow: 'hidden' },
   repoList: { flex: 1, minHeight: 0 },
+  commitFormPane: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    minHeight: 0,
+    overflow: 'hidden',
+  } as React.CSSProperties,
   filteredEmptyState: {
     display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: '10px',
     padding: '32px 16px', color: 'var(--vscode-foreground)', opacity: 0.7,

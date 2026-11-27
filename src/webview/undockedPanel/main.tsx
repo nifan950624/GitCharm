@@ -35,7 +35,7 @@ import { useResize } from '../shared/useResize';
 declare const window: Window & { __INITIAL_CONFIG__?: { showCommit?: boolean } };
 
 function UndockedApp() {
-  const { panelRef: commitRef, onMouseDown: onCommitResize } = useResize('right', 420, 280);
+  const { panelRef: commitRef, onMouseDown: onCommitResize } = useResize({ id: 'undocked.commit', axis: 'x', side: 'before', initial: 420, min: 280 });
   const showCommit = window.__INITIAL_CONFIG__?.showCommit !== false;
 
   return (

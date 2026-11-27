@@ -1,48 +1,69 @@
 import { useRef, useCallback } from 'react';
 
 /**
- * Drag-to-resize hook for a panel adjacent to a resize handle.
- * Returns a callback ref to attach to the panel and a mousedown handler for the handle.
+ * Drag-to-resize a pane that sits beside a SplitHandle, on either axis.
+ * The size is kept for the life of the webview and, when `id` is set, restored
+ * from localStorage the next time the view opens.
  *
- * There is no fixed maximum: the panel can grow until the flexible siblings in the
- * same flex row (the ones with flex-grow > 0) reach their CSS min-width, so on wide
- * screens every panel can be pushed to one side. The panel itself is laid out as
- * `flex: 0 1 <width>` with `min-width: <min>`, so when the window narrows it shrinks
- * down to `min` instead of being clipped, and gets its width back when it widens.
- *
- * @param direction  'right' = dragging handle resizes the panel on its left
- *                   'left'  = dragging handle resizes the panel on its right
- * @param initial    Initial pixel width
- * @param min        Minimum pixel width
+ * There is no fixed maximum: the pane grows until flexible siblings reach their
+ * min size. It is laid out as `flex: 0 1 <size>` with a minimum, so a narrow
+ * window shrinks it to that minimum and gives the size back when there is room.
  */
-export function useResize(
-  direction: 'right' | 'left',
-  initial: number,
-  min: number,
-) {
-  const elRef = useRef<HTMLDivElement | null>(null);
-  const widthRef = useRef(initial);
+export interface ResizeOptions {
+  /** Stable key. The dragged size is restored the next time this pane mounts. */
+  id?: string;
+  /** 'x' resizes width, 'y' resizes height. */
+  axis?: 'x' | 'y';
+  /** The pane is before the handle (left/top) or after it (right/bottom). */
+  side: 'before' | 'after';
+  initial: number;
+  min: number;
+}
 
-  // Apply the current width whenever the panel mounts, so a panel that is unmounted
-  // and mounted again (e.g. the commit detail) keeps the width the user dragged it to.
+interface ResizeBinding {
+  panelRef: (el: HTMLDivElement | null) => void;
+  onMouseDown: (e: React.MouseEvent) => void;
+}
+
+const STORAGE_PREFIX = 'gitcharm.split.';
+
+export function useResize(direction: 'right' | 'left', initial: number, min: number): ResizeBinding;
+export function useResize(options: ResizeOptions): ResizeBinding;
+export function useResize(
+  directionOrOptions: 'right' | 'left' | ResizeOptions,
+  initial?: number,
+  min?: number,
+): ResizeBinding {
+  const options: ResizeOptions = typeof directionOrOptions === 'string'
+    ? { axis: 'x', side: directionOrOptions === 'right' ? 'before' : 'after', initial: initial ?? 0, min: min ?? 0 }
+    : directionOrOptions;
+  const axis = options.axis ?? 'x';
+  const { id, side } = options;
+  const minSize = options.min;
+
+  const elRef = useRef<HTMLDivElement | null>(null);
+  const sizeRef = useRef(readSize(id, options.initial));
+
   const panelRef = useCallback((el: HTMLDivElement | null) => {
     elRef.current = el;
-    if (el) applyWidth(el, widthRef.current, min);
-  }, [min]);
+    if (el) applySize(el, sizeRef.current, minSize, axis);
+  }, [axis, minSize]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const panel = elRef.current;
     if (!panel) return;
-    const startX = e.clientX;
-    const startWidth = panel.offsetWidth;
-    const max = Math.max(startWidth, maxWidth(panel));
+    const start = axis === 'x' ? e.clientX : e.clientY;
+    const startSize = axis === 'x' ? panel.offsetWidth : panel.offsetHeight;
+    const max = Math.max(startSize, maxSize(panel, axis));
 
     const onMove = (ev: MouseEvent) => {
-      const delta = direction === 'right' ? ev.clientX - startX : startX - ev.clientX;
-      const next = Math.min(max, Math.max(min, startWidth + delta));
-      widthRef.current = next;
-      if (elRef.current) applyWidth(elRef.current, next, min);
+      const point = axis === 'x' ? ev.clientX : ev.clientY;
+      const delta = side === 'before' ? point - start : start - point;
+      const next = Math.min(max, Math.max(minSize, startSize + delta));
+      sizeRef.current = next;
+      writeSize(id, next);
+      if (elRef.current) applySize(elRef.current, next, minSize, axis);
     };
 
     const onUp = () => {
@@ -52,31 +73,58 @@ export function useResize(
       document.body.style.userSelect = '';
     };
 
-    document.body.style.cursor = 'col-resize';
+    document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize';
     document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-  }, [direction, min]);
+  }, [axis, id, minSize, side]);
 
   return { panelRef, onMouseDown };
 }
 
-function applyWidth(el: HTMLDivElement, width: number, min: number) {
-  el.style.width = `${width}px`;
-  el.style.flex = `0 1 ${width}px`;
-  el.style.minWidth = `${min}px`;
+function readSize(id: string | undefined, initial: number): number {
+  if (!id) return initial;
+  try {
+    const n = Number(localStorage.getItem(STORAGE_PREFIX + id));
+    return Number.isFinite(n) && n > 0 ? n : initial;
+  } catch {
+    return initial;
+  }
 }
 
-/** Widest the panel can get: the row width minus the fixed siblings and the min-width of the flexible ones. */
-function maxWidth(panel: HTMLElement): number {
+function writeSize(id: string | undefined, size: number) {
+  if (!id) return;
+  try { localStorage.setItem(STORAGE_PREFIX + id, String(Math.round(size))); } catch { /* storage unavailable */ }
+}
+
+function applySize(el: HTMLDivElement, size: number, min: number, axis: 'x' | 'y') {
+  const px = `${size}px`;
+  el.style.flex = `0 1 ${px}`;
+  if (axis === 'x') {
+    el.style.width = px;
+    el.style.minWidth = `${min}px`;
+  } else {
+    el.style.height = px;
+    el.style.minHeight = `${min}px`;
+  }
+}
+
+/** Largest the pane can get before flexible siblings hit their minimum. */
+function maxSize(panel: HTMLElement, axis: 'x' | 'y'): number {
   const parent = panel.parentElement;
   if (!parent) return Infinity;
+  const parentSize = axis === 'x' ? parent.clientWidth : parent.clientHeight;
   let taken = 0;
   for (const sibling of Array.from(parent.children)) {
     if (sibling === panel || !(sibling instanceof HTMLElement)) continue;
     const style = getComputedStyle(sibling);
     if (style.display === 'none' || style.position === 'absolute' || style.position === 'fixed') continue;
-    taken += parseFloat(style.flexGrow) > 0 ? parseFloat(style.minWidth) || 0 : sibling.offsetWidth;
+    const grows = parseFloat(style.flexGrow) > 0;
+    if (grows) {
+      taken += parseFloat(axis === 'x' ? style.minWidth : style.minHeight) || 0;
+    } else {
+      taken += axis === 'x' ? sibling.offsetWidth : sibling.offsetHeight;
+    }
   }
-  return parent.clientWidth - taken;
+  return parentSize - taken;
 }

@@ -51,8 +51,8 @@ function detectViewLocation(): LogViewLocation {
 function App() {
   const store = useLogStore();
   const pendingRef = useRef<Map<string, (msg: HostToLogMsg) => void>>(new Map());
-  const { panelRef: sidebarRef, onMouseDown: onSidebarResize } = useResize('right', 250, 120);
-  const { panelRef: detailRef, onMouseDown: onDetailResize } = useResize('left', 380, 200);
+  const { panelRef: sidebarRef, onMouseDown: onSidebarResize } = useResize({ id: 'log.branches', axis: 'x', side: 'before', initial: 250, min: 120 });
+  const { panelRef: detailRef, onMouseDown: onDetailResize } = useResize({ id: 'log.detail', axis: 'x', side: 'after', initial: 380, min: 200 });
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [layoutByLocation, setLayoutByLocation] = useState(initialLayout);
   const [columns, setColumns] = useState<LogColumns>({ graph: true, author: true, avatar: true, date: true, hash: true, refs: true });

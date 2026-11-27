@@ -1690,8 +1690,6 @@
   "{0} (token)": "{0} (jeton)",
   "Enter the organization.": "Saisissez l'organisation.",
   "Show commit graph": "Afficher le graphe des commits",
-  "Drag to resize the commit message. Double-click to fit the text.": "Faites glisser pour changer la hauteur du message de commit. Double-cliquez pour l'ajuster au texte.",
-  "Resize commit message": "Redimensionner le message de commit",
   "Push rejected by the remote ({0}): {1}": "Push rejeté par le remote ({0}) : {1}",
   "Push rejected by the remote ({0}).": "Push rejeté par le remote ({0}).",
   "Show Diff with Working Tree": "Afficher le diff avec l'arbre de travail",

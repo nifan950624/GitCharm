@@ -18,6 +18,8 @@ import { handleTreeNavKeyDown } from '../../shared/keyboardNav';
 import type { ChangedFile } from '../../../host/types/messages';
 import * as l10n from '@vscode/l10n';
 import { plural } from '../../shared/l10n';
+import { useResize } from '../../shared/useResize';
+import { ResizeHandle } from '../../shared/ResizeHandle';
 
 function generateId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -238,6 +240,16 @@ function OpenDetailRow({ repoId, hash, style, children }: { repoId: string; hash
       {children}
     </div>
   );
+}
+
+const TREE_MIN_HEIGHT = 24;
+const DETAIL_MIN_HEIGHT = 28;
+
+function sidebarAuthor(commit: CommitNode, activeProfile?: { gitName: string; gitEmail: string }): { name: string; email: string } {
+  if (commit.isStash || commit.isWorkingTree) {
+    return { name: activeProfile?.gitName ?? l10n.t('You'), email: activeProfile?.gitEmail ?? '' };
+  }
+  return { name: commit.authorName, email: commit.authorEmail };
 }
 
 /* ─── Main component ──────────────────────────────────────────────────────── */
@@ -581,6 +593,10 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
     } satisfies LogToHostMsg);
   }
 
+  const { panelRef: treePaneRef, onMouseDown: onTreeResize } = useResize({
+    id: 'log.detailTree', axis: 'y', side: 'before', initial: 200, min: TREE_MIN_HEIGHT,
+  });
+
   if (!commit) {
     return (
       <div style={styles.empty}>
@@ -589,12 +605,7 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
     );
   }
 
-  // The top-right buttons float over the header; the repo row, level with them, keeps clear
-  // of however many are showing
   const combined = selection?.mode === 'combined';
-  const topActionCount = twoColumnLayout ? 0
-    : (onClose ? 1 : 0) + (selection ? (combined ? 1 : 0) : 1 + (!hideExtendedDetailButton && !commit.isWorkingTree ? 1 : 0));
-  const topActionsWidth = topActionCount > 0 ? topActionCount * TOP_ACTION_BTN_WIDTH + 4 : 0;
 
   const activeFiles = files;
   const activeLoading = loadingFiles;
@@ -625,72 +636,33 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
       style={twoColumnLayout ? styles.containerTwoColumn : styles.container}
       onContextMenu={e => e.preventDefault()}
     >
-      {!twoColumnLayout && (
-      <div style={styles.topActions}>
-        {selection && combined && (
-          <button
-            data-top-action-btn=""
-            style={styles.topActionBtn}
-            title={l10n.t('Open Changes')}
-            onClick={() => getVsCodeApi().postMessage({ type: 'LOG_VIEW_COMBINED_DIFF', groups: selectionGroups(selection.commits) } satisfies LogToHostMsg)}
-          >
-            <Codicon name="diff-multiple" style={{ fontSize: '16px' }} />
-          </button>
-        )}
-        {!range && (
-          <>
-            <button
-              data-top-action-btn=""
-              style={styles.topActionBtn}
-              title={l10n.t('Open Changes')}
-              onClick={() => getVsCodeApi().postMessage(commit.isWorkingTree
-                ? { type: 'LOG_OPEN_WORKING_TREE_CHANGES', repoId: commit.repoId } satisfies LogToHostMsg
-                : { type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
-            >
-              <Codicon name="diff-multiple" style={{ fontSize: '16px' }} />
-            </button>
-            {!hideExtendedDetailButton && !commit.isWorkingTree && (
-              <button
-                data-top-action-btn=""
-                style={styles.topActionBtn}
-                title={l10n.t('Open extended commit detail')}
-                onClick={() => getVsCodeApi().postMessage({ type: 'LOG_OPEN_EXTENDED_DETAIL', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
-              >
-                <Codicon name="open-in-product" style={{ fontSize: '16px' }} />
-              </button>
-            )}
-          </>
-        )}
-        {onClose && (
-          <button data-top-action-btn="" style={styles.topActionBtn} title={l10n.t('Close commit detail')} onClick={onClose}>
-            <Codicon name="right-panel-hide" style={{ fontSize: '16px' }} />
-          </button>
-        )}
-      </div>
-      )}
       {/* Commit header */}
       <div
         className={twoColumnLayout ? 'commit-detail-two-column-header' : undefined}
-        style={twoColumnLayout ? styles.headerTwoColumn : styles.header}
+        style={twoColumnLayout ? styles.headerTwoColumn : { ...styles.header, ...styles.sidebarDetails }}
       >
         {selection ? (
           <>
-            {repoName && (
-              <div style={{ ...styles.repoRow, paddingRight: topActionsWidth }}>
+            {twoColumnLayout && repoName && (
+              <div style={styles.repoRow}>
                 <Codicon name="repo" style={styles.repoIcon} />
                 <span style={styles.repoName(effectiveRepoColor)}>{repoName}</span>
               </div>
             )}
-            <div style={{ ...styles.rangeTitle, paddingRight: repoName ? 0 : topActionsWidth }}>
-              <span>{combined ? l10n.t('Combined changes') : l10n.t('Compare commits')}</span>
-            </div>
+            {twoColumnLayout && (
+              <div style={styles.rangeTitle}>
+                <span>{combined ? l10n.t('Combined changes') : l10n.t('Compare commits')}</span>
+              </div>
+            )}
             {combined ? (
               <>
-                <div style={styles.rangeHint}>
-                  {multiRepoSelection
-                    ? l10n.t('Changes introduced by {0} commits in {1} repositories', selection.commits.length, selectionRepoIds.length)
-                    : l10n.t('Changes introduced by {0} commits', selection.commits.length)}
-                </div>
+                {twoColumnLayout && (
+                  <div style={styles.rangeHint}>
+                    {multiRepoSelection
+                      ? l10n.t('Changes introduced by {0} commits in {1} repositories', selection.commits.length, selectionRepoIds.length)
+                      : l10n.t('Changes introduced by {0} commits', selection.commits.length)}
+                  </div>
+                )}
                 <div style={styles.selectionList}>
                   {[...selection.commits].reverse().map(c => (
                     <OpenDetailRow key={`${c.repoId}:${c.hash}`} repoId={c.repoId} hash={c.hash} style={styles.selectionRow}>
@@ -703,7 +675,7 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
               </>
             ) : (
               <>
-                <div style={styles.rangeHint}>{l10n.t('Changes between the selected snapshots')}</div>
+                {twoColumnLayout && <div style={styles.rangeHint}>{l10n.t('Changes between the selected snapshots')}</div>}
                 <div style={styles.hashRow}>
                   <span style={styles.hash}>{selection.commits[0].shortHash}</span>
                   <Codicon name="arrow-right" style={{ fontSize: '11px', opacity: 0.6 }} />
@@ -714,21 +686,40 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
           </>
         ) : (
           <>
-            {repoName && !twoColumnLayout && (
-              <div style={{ ...styles.repoRow, paddingRight: topActionsWidth }}>
-            <Codicon name="repo" style={styles.repoIcon} />
-            <span style={styles.repoName(effectiveRepoColor)}>{repoName}</span>
+        {!twoColumnLayout && (() => {
+          const author = sidebarAuthor(commit, activeProfile);
+          const hash = commit.isWorkingTree ? '' : (commit.isStash ? (commit.stashRef ?? commit.shortHash) : commit.shortHash);
+          return (
+            <div>
+              <div style={{ ...styles.summaryMessage, ...(commit.isWorkingTree ? { fontStyle: 'italic' as const } : {}) }}>
+                {commit.isWorkingTree ? l10n.t('Uncommitted Changes') : (fullMessage || commit.message)}
+              </div>
+              <div style={styles.summaryMeta}>
+                {hash && <span style={styles.summaryHash}>{hash}</span>}
+                {l10n.t('Author')} {author.name}{author.email ? ` <${author.email}>` : ''}, {formatDateTime(commit.authorDate)}
+              </div>
+            </div>
+          );
+        })()}
+        {!twoColumnLayout && commit.isWorkingTree && (
+          <div style={styles.refsRow}>
+            {commit.workingTreeBranch ? (
+              <span style={styles.refBadge(refColors?.get(`${commit.repoId}:${commit.workingTreeBranch}`) ?? branchColor(commit.workingTreeBranch, false))} title={l10n.t('Local: {0}', commit.workingTreeBranch)}>
+                <Codicon name="git-branch" style={{ fontSize: '11px', flexShrink: 0, lineHeight: 1 }} />
+                {commit.workingTreeBranch}
+              </span>
+            ) : (
+              <span style={styles.refBadge(headColor(), true)}>
+                <Codicon name="warning" style={{ fontSize: '11px', flexShrink: 0, lineHeight: 1 }} />
+                {l10n.t('HEAD (detached)')}
+              </span>
+            )}
           </div>
         )}
-        {!twoColumnLayout && !commit.isWorkingTree && (
-          <div style={styles.hashRow}>
-            <span style={styles.hash}>{commit.shortHash}</span>
-            <span style={styles.message}>
-              {commit.message}
-            </span>
-          </div>
+        {!twoColumnLayout && commit.isStash && (
+          <div style={styles.refsRow}>{stashBadges()}</div>
         )}
-        {commit.isWorkingTree ? (
+        {twoColumnLayout && commit.isWorkingTree ? (
           <div>
             <div style={styles.hashRow}>
               <span style={{ ...styles.message, fontStyle: 'italic' }}>{l10n.t('Uncommitted Changes')}</span>
@@ -761,56 +752,29 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
               )}
             </div>
           </div>
-        ) : commit.isStash ? (
+        ) : twoColumnLayout && commit.isStash ? (
           <div>
-            {twoColumnLayout && <div style={styles.detailsLabel}>{l10n.t('Author')}</div>}
-            <div style={twoColumnLayout ? styles.authorRowTwoColumn : styles.authorRow}>
+            <div style={styles.detailsLabel}>{l10n.t('Author')}</div>
+            <div style={styles.authorRowTwoColumn}>
               <AuthorAvatar authorName={activeProfile?.gitName ?? l10n.t('You')} authorEmail={activeProfile?.gitEmail ?? ''} size={32} isYou={!activeProfile} />
-              {twoColumnLayout ? (
-                <div style={styles.authorMeta}>
-                  <span style={styles.authorName}>{activeProfile?.gitName ?? l10n.t('You')}</span>
-                  {activeProfile?.gitEmail && <span style={styles.authorEmail}>{activeProfile.gitEmail}</span>}
-                </div>
-              ) : (
-                <div style={styles.meta}>
-                  <span>{activeProfile?.gitName ?? l10n.t('You')}</span>
-                  {activeProfile?.gitEmail && (
-                    <>
-                      <span style={styles.dot}>·</span>
-                      <span>{activeProfile.gitEmail}</span>
-                    </>
-                  )}
-                  <span style={styles.dot}>·</span>
-                  <span>{formatDateTime(commit.authorDate)}</span>
-                </div>
-              )}
+              <div style={styles.authorMeta}>
+                <span style={styles.authorName}>{activeProfile?.gitName ?? l10n.t('You')}</span>
+                {activeProfile?.gitEmail && <span style={styles.authorEmail}>{activeProfile.gitEmail}</span>}
+              </div>
             </div>
-            {!twoColumnLayout && (
-              <div style={styles.refsRow}>{stashBadges()}</div>
-            )}
           </div>
-        ) : (
+        ) : twoColumnLayout ? (
           <div>
-            {twoColumnLayout && <div style={styles.detailsLabel}>{l10n.t('Author')}</div>}
-            <div style={twoColumnLayout ? styles.authorRowTwoColumn : styles.authorRow}>
+            <div style={styles.detailsLabel}>{l10n.t('Author')}</div>
+            <div style={styles.authorRowTwoColumn}>
               <AuthorAvatar authorName={commit.authorName} authorEmail={commit.authorEmail} size={32} repoId={commit.repoId} sha={forgeSha(commit)} />
-              {twoColumnLayout ? (
-                <div style={styles.authorMeta}>
-                  <span style={styles.authorName}>{commit.authorName}</span>
-                  <span style={styles.authorEmail}>{commit.authorEmail}</span>
-                </div>
-              ) : (
-                <div style={styles.meta}>
-                  <span>{commit.authorName}</span>
-                  <span style={styles.dot}>·</span>
-                  <span>{commit.authorEmail}</span>
-                  <span style={styles.dot}>·</span>
-                  <span>{formatDateTime(commit.authorDate)}</span>
-                </div>
-              )}
+              <div style={styles.authorMeta}>
+                <span style={styles.authorName}>{commit.authorName}</span>
+                <span style={styles.authorEmail}>{commit.authorEmail}</span>
+              </div>
             </div>
           </div>
-        )}
+        ) : null}
         {twoColumnLayout && (
           <div>
             <div style={styles.detailsLabel}>{l10n.t('Details')}</div>
@@ -830,42 +794,6 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
             </div>
           </div>
         )}
-        {!twoColumnLayout && branchBadges.length > 0 && (() => {
-          const LIMIT = 5;
-          const visible = refsExpanded ? branchBadges : branchBadges.slice(0, LIMIT);
-          const hiddenCount = branchBadges.length - LIMIT;
-          return (
-            <div>
-              <div style={refsExpanded ? styles.refsRowExpanded : styles.refsRow}>
-                {nonDetachedBranchHead && (
-                  <span style={styles.refBadge(headColor(), true)} title={`HEAD → ${nonDetachedBranchHead.label}`}>
-                    <Codicon name="arrow-right" style={{ fontSize: '9px', flexShrink: 0, lineHeight: 1 }} />
-                    HEAD
-                  </span>
-                )}
-                {visible.map(renderBranchBadge)}
-                {!refsExpanded && hiddenCount > 0 && (
-                  <span
-                    style={styles.refsShowMore}
-                    onClick={() => setRefsExpanded(true)}
-                    title={l10n.t('Show {0} more', hiddenCount)}
-                  >
-                    {l10n.t('+{0} more', hiddenCount)}
-                  </span>
-                )}
-                {refsExpanded && branchBadges.length > LIMIT && (
-                  <span
-                    style={{ ...styles.refsShowMore, width: '100%', marginTop: '2px' }}
-                    onClick={() => setRefsExpanded(false)}
-                  >
-                    {l10n.t('Show less')}
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })()}
-
         {twoColumnLayout && (commit.isStash || branchBadges.length > 0) && (() => {
           if (commit.isStash) {
             return (
@@ -974,7 +902,7 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
 
         {/* Merged commits section — a minimal hash+message list in the Log Panel,
             an expanded one with author/date/stats in Full Detail. */}
-        {isMerge && (
+        {twoColumnLayout && isMerge && (
           <div style={twoColumnLayout ? undefined : styles.mergeSection}>
             {twoColumnLayout ? (
               <div style={styles.detailsLabel}>{l10n.t('Merged Commits')}{mergeCountSuffix}</div>
@@ -1037,8 +965,10 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
         )}
       </div>
 
+      {!twoColumnLayout && <ResizeHandle axis="y" onMouseDown={onTreeResize} style={{ order: 2 }} />}
+
       {onSelectionModeChange && (
-        <div style={styles.modeTabs} role="tablist">
+        <div style={twoColumnLayout ? styles.modeTabs : { ...styles.modeTabs, order: 0 }} role="tablist">
           <button type="button" role="tab" aria-selected={combined} style={styles.modeTab(combined)} onClick={() => onSelectionModeChange('combined')}>
             {l10n.t('Combined')}
           </button>
@@ -1049,59 +979,101 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
       )}
 
       <div
+        ref={twoColumnLayout ? undefined : treePaneRef}
         className={twoColumnLayout ? 'commit-detail-two-column-right' : undefined}
-        style={twoColumnLayout ? styles.rightColumn : styles.rightColumnInline}
+        style={twoColumnLayout ? styles.rightColumn : styles.treePane}
       >
-      {/* File list toolbar */}
+      {/* File list toolbar. One row: the count, then view controls, then the pane actions. */}
       <div style={styles.fileListToolbar}>
-        {twoColumnLayout && !range && (
-          <button
-            data-top-action-btn=""
-            style={styles.toggleBtn(false, twoColumnLayout)}
-            title={l10n.t('Open Changes')}
-            onClick={() => getVsCodeApi().postMessage({ type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
-          >
-            <Codicon name="diff-multiple" style={{ fontSize: twoColumnLayout ? '16px' : '14px' }} />
-          </button>
-        )}
         <span style={styles.fileCount}>{plural(activeFiles.length, l10n.t('1 file'), l10n.t('{0} files', activeFiles.length))}</span>
-        {viewMode === 'tree' && (
-          <div style={styles.expandBtns}>
-            <button
-              data-top-action-btn=""
-              style={styles.toggleBtn(false, twoColumnLayout)}
-              onClick={() => applyAllExpanded(true)}
-              title={l10n.t('Expand all')}
-            >
-              <Codicon name="expand-all" style={{ fontSize: twoColumnLayout ? '16px' : '14px' }} />
-            </button>
-            <button
-              data-top-action-btn=""
-              style={styles.toggleBtn(false, twoColumnLayout)}
-              onClick={() => applyAllExpanded(false)}
-              title={l10n.t('Collapse all')}
-            >
-              <Codicon name="collapse-all" style={{ fontSize: twoColumnLayout ? '16px' : '14px' }} />
-            </button>
-          </div>
-        )}
-        <div style={styles.viewToggle}>
+        <div style={styles.toolbarGroup}>
+          {viewMode === 'tree' && (
+            <>
+              <button
+                data-top-action-btn=""
+                style={styles.toggleBtn(false)}
+                onClick={() => applyAllExpanded(true)}
+                title={l10n.t('Expand all')}
+              >
+                <Codicon name="expand-all" style={styles.toolbarIcon} />
+              </button>
+              <button
+                data-top-action-btn=""
+                style={styles.toggleBtn(false)}
+                onClick={() => applyAllExpanded(false)}
+                title={l10n.t('Collapse all')}
+              >
+                <Codicon name="collapse-all" style={styles.toolbarIcon} />
+              </button>
+              <span style={styles.toolbarDivider} />
+            </>
+          )}
           <button
             data-top-action-btn=""
-            style={styles.toggleBtn(viewMode === 'tree', twoColumnLayout)}
+            style={styles.toggleBtn(viewMode === 'tree')}
             onClick={() => { setViewMode('tree'); applyAllExpanded(null); }}
             title={l10n.t('Tree view')}
           >
-            <Codicon name="list-tree" style={{ fontSize: twoColumnLayout ? '16px' : '14px' }} />
+            <Codicon name="list-tree" style={styles.toolbarIcon} />
           </button>
           <button
             data-top-action-btn=""
-            style={styles.toggleBtn(viewMode === 'flat', twoColumnLayout)}
+            style={styles.toggleBtn(viewMode === 'flat')}
             onClick={() => { setViewMode('flat'); applyAllExpanded(null); }}
             title={l10n.t('Flat view')}
           >
-            <Codicon name="list-flat" style={{ fontSize: twoColumnLayout ? '16px' : '14px' }} />
+            <Codicon name="list-flat" style={styles.toolbarIcon} />
           </button>
+          {((twoColumnLayout && !range) || (!twoColumnLayout && ((selection && combined) || !range || onClose))) && (
+            <span style={styles.toolbarDivider} />
+          )}
+          {twoColumnLayout && !range && (
+            <button
+              data-top-action-btn=""
+              style={styles.toggleBtn(false)}
+              title={l10n.t('Open Changes')}
+              onClick={() => getVsCodeApi().postMessage({ type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
+            >
+              <Codicon name="diff-multiple" style={styles.toolbarIcon} />
+            </button>
+          )}
+          {!twoColumnLayout && selection && combined && (
+            <button
+              data-top-action-btn=""
+              style={styles.toggleBtn(false)}
+              title={l10n.t('Open Changes')}
+              onClick={() => getVsCodeApi().postMessage({ type: 'LOG_VIEW_COMBINED_DIFF', groups: selectionGroups(selection.commits) } satisfies LogToHostMsg)}
+            >
+              <Codicon name="diff-multiple" style={styles.toolbarIcon} />
+            </button>
+          )}
+          {!twoColumnLayout && !range && (
+            <button
+              data-top-action-btn=""
+              style={styles.toggleBtn(false)}
+              title={l10n.t('Open Changes')}
+              onClick={() => getVsCodeApi().postMessage(commit.isWorkingTree
+                ? { type: 'LOG_OPEN_WORKING_TREE_CHANGES', repoId: commit.repoId } satisfies LogToHostMsg
+                : { type: 'LOG_OPEN_COMMIT_CHANGES', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
+            >
+              <Codicon name="diff-multiple" style={styles.toolbarIcon} />
+            </button>
+          )}
+          {!twoColumnLayout && !range && !hideExtendedDetailButton && !commit.isWorkingTree && (
+            <button
+              data-top-action-btn=""
+              style={styles.toggleBtn(false)}
+              title={l10n.t('Open extended commit detail')}
+              onClick={() => getVsCodeApi().postMessage({ type: 'LOG_OPEN_EXTENDED_DETAIL', repoId: commit.repoId, hash: commit.hash } satisfies LogToHostMsg)}
+            >
+              <Codicon name="open-in-product" style={styles.toolbarIcon} />
+            </button>
+          )}
+          {!twoColumnLayout && onClose && (
+            <button data-top-action-btn="" style={styles.toggleBtn(false)} title={l10n.t('Close commit detail')} onClick={onClose}>
+              <Codicon name="right-panel-hide" style={styles.toolbarIcon} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1163,9 +1135,6 @@ export function CommitDetail({ commit, fullMessage, selection, onSelectionModeCh
   );
 }
 
-// A top action button: a 16px icon, 4px padding each side, 2px gap to the next
-const TOP_ACTION_BTN_WIDTH = 26;
-
 // Files under a repo header start one level in, past its chevron
 const REPO_GROUP_BASE_PAD = 22;
 
@@ -1205,26 +1174,6 @@ const styles = {
     opacity: 0.4,
     color: 'var(--vscode-foreground)',
   },
-  topActions: {
-    position: 'absolute' as const,
-    top: '4px',
-    right: '4px',
-    zIndex: 10,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '2px',
-  },
-  topActionBtn: {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '3px 4px',
-    borderRadius: '3px',
-    color: 'var(--vscode-foreground)',
-    opacity: 0.5,
-    display: 'flex',
-    alignItems: 'center',
-  },
   header: {
     padding: '10px 12px',
     borderBottom: '1px solid var(--vscode-panel-border)',
@@ -1232,6 +1181,43 @@ const styles = {
     flexDirection: 'column' as const,
     gap: '4px',
   },
+  sidebarDetails: {
+    order: 3,
+    flex: '1 1 auto',
+    minHeight: DETAIL_MIN_HEIGHT,
+    boxSizing: 'border-box' as const,
+    padding: '4px 8px',
+    gap: '2px',
+    overflowY: 'auto' as const,
+    borderBottom: 'none',
+  } as React.CSSProperties,
+  treePane: {
+    order: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden',
+    minWidth: 0,
+  } as React.CSSProperties,
+  summaryMessage: {
+    margin: 0,
+    fontWeight: 600,
+    fontSize: '13px',
+    lineHeight: 1.45,
+    color: 'var(--vscode-charts-orange, #e08a6a)',
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+  } as React.CSSProperties,
+  summaryMeta: {
+    marginTop: '4px',
+    fontSize: '12px',
+    lineHeight: 1.45,
+    opacity: 0.72,
+    wordBreak: 'break-word' as const,
+  } as React.CSSProperties,
+  summaryHash: {
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    marginRight: '6px',
+  } as React.CSSProperties,
   headerTwoColumn: {
     padding: '20px 24px',
     borderRight: '1px solid var(--vscode-panel-border)',
@@ -1588,40 +1574,57 @@ const styles = {
   fileListToolbar: {
     display: 'flex',
     alignItems: 'center',
-    padding: '3px 10px',
+    padding: '2px 8px',
+    minHeight: 28,
     borderBottom: '1px solid var(--vscode-panel-border)',
     gap: '4px',
+    minWidth: 0,
   } as React.CSSProperties,
   fileCount: {
     flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
     fontSize: '11px',
     opacity: 0.55,
     color: 'var(--vscode-foreground)',
   } as React.CSSProperties,
-  expandBtns: {
-    display: 'flex',
-    gap: '2px',
-  } as React.CSSProperties,
-  viewToggle: {
-    display: 'flex',
-    gap: '2px',
-    marginLeft: '4px',
-    paddingLeft: '4px',
-    borderLeft: '1px solid var(--vscode-panel-border)',
-  } as React.CSSProperties,
-  toggleBtn: (active: boolean, large = false): React.CSSProperties => ({
-    background: active ? 'var(--vscode-toolbar-activeBackground)' : 'transparent',
-    border: 'none',
-    borderRadius: large ? '5px' : '3px',
-    cursor: 'pointer',
-    color: 'var(--vscode-foreground)',
-    opacity: active ? 1 : 0.7,
-    padding: large ? '5px 6px' : '2px 4px',
+  toolbarGroup: {
     display: 'flex',
     alignItems: 'center',
+    flexShrink: 0,
+    gap: '1px',
+  } as React.CSSProperties,
+  toolbarDivider: {
+    width: '1px',
+    height: '14px',
+    margin: '0 4px',
+    background: 'var(--vscode-panel-border)',
+    flexShrink: 0,
+  } as React.CSSProperties,
+  toolbarIcon: {
+    fontSize: '14px',
+    lineHeight: 1,
+  } as React.CSSProperties,
+  toggleBtn: (active: boolean): React.CSSProperties => ({
+    width: '22px',
+    height: '22px',
+    padding: 0,
+    justifyContent: 'center',
+    background: active ? 'var(--vscode-toolbar-activeBackground)' : 'transparent',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    color: 'var(--vscode-foreground)',
+    opacity: active ? 1 : 0.75,
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
   }),
   fileList: {
     flex: 1,
+    minHeight: 0,
     overflowY: 'auto' as const,
     fontSize: '12px',
   },
@@ -1633,9 +1636,6 @@ const styles = {
     display: 'flex',
     flexDirection: 'column' as const,
     overflow: 'hidden',
-  } as React.CSSProperties,
-  rightColumnInline: {
-    display: 'contents',
   } as React.CSSProperties,
   loading: {
     padding: '8px',

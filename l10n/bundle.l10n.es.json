@@ -1690,8 +1690,6 @@
   "{0} (token)": "{0} (token)",
   "Enter the organization.": "Introduce la organización.",
   "Show commit graph": "Mostrar el grafo de commits",
-  "Drag to resize the commit message. Double-click to fit the text.": "Arrastra para cambiar la altura del mensaje de commit. Doble clic para ajustarlo al texto.",
-  "Resize commit message": "Cambiar la altura del mensaje de commit",
   "Push rejected by the remote ({0}): {1}": "El remoto rechazó el push ({0}): {1}",
   "Push rejected by the remote ({0}).": "El remoto rechazó el push ({0}).",
   "Show Diff with Working Tree": "Mostrar diff con el árbol de trabajo",

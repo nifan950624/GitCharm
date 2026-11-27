@@ -9,29 +9,6 @@ import { shortcut } from '../../shared/shortcut';
 import { plural } from '../../shared/l10n';
 import { isImeComposing } from '../../shared/ime';
 
-const MESSAGE_HEIGHT_KEY = 'gitcharm:commitMessageHeight';
-const MIN_MESSAGE_HEIGHT = 52;
-
-function maxMessageHeight(): number {
-  return Math.max(MIN_MESSAGE_HEIGHT, Math.floor(window.innerHeight * 0.7));
-}
-
-function clampMessageHeight(height: number): number {
-  return Math.min(maxMessageHeight(), Math.max(MIN_MESSAGE_HEIGHT, Math.round(height)));
-}
-
-/** A height the user dragged to, or null while the box still grows with the text. */
-function loadMessageHeight(): number | null {
-  try {
-    const raw = localStorage.getItem(MESSAGE_HEIGHT_KEY);
-    if (!raw) return null;
-    const n = Number(raw);
-    return Number.isFinite(n) ? clampMessageHeight(n) : null;
-  } catch {
-    return null;
-  }
-}
-
 interface Props {
   message: string;
   repoStatuses: RepoStatus[];
@@ -310,7 +287,6 @@ export function UnifiedCommitForm({
   const amend = amendFlags[amendRepoId ?? ''] ?? false;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [messageHeight, setMessageHeight] = useState<number | null>(loadMessageHeight);
   /** Where the cursor was when the message box last had focus — a button click takes the focus away before inserting. */
   const lastCaretRef = useRef<{ start: number; end: number } | null>(null);
   const rememberCaret = () => {
@@ -355,8 +331,7 @@ export function UnifiedCommitForm({
     if (!document.getElementById(id)) {
       const s = document.createElement('style');
       s.id = id;
-      s.textContent = `.gs-ctx-item:hover { background: var(--vscode-menu-selectionBackground) !important; color: var(--vscode-menu-selectionForeground) !important; }
-.gs-message-resize:hover .gs-message-resize-grip, .gs-message-resize:active .gs-message-resize-grip { background: var(--vscode-focusBorder); }`;
+      s.textContent = `.gs-ctx-item:hover { background: var(--vscode-menu-selectionBackground) !important; color: var(--vscode-menu-selectionForeground) !important; }`;
       document.head.appendChild(s);
     }
   }, []);
@@ -406,76 +381,6 @@ export function UnifiedCommitForm({
     setCtxMenu(null);
     requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + text.length; });
   }
-
-  const resizeTextarea = () => {
-    const el = textareaRef.current;
-    if (!el || messageHeight != null) return;
-    el.style.height = 'auto';
-    const maxHeight = maxMessageHeight();
-    if (el.scrollHeight > maxHeight) {
-      el.style.height = `${maxHeight}px`;
-      el.style.overflow = 'auto';
-    } else {
-      el.style.height = `${el.scrollHeight}px`;
-      el.style.overflow = 'hidden';
-    }
-  };
-
-  useEffect(() => { resizeTextarea(); }, [message, messageHeight]);
-
-  useEffect(() => {
-    const onResize = () => {
-      if (messageHeight == null) { resizeTextarea(); return; }
-      const clamped = clampMessageHeight(messageHeight);
-      if (clamped !== messageHeight) setMessageHeight(clamped);
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [messageHeight]);
-
-  const onResizeMessage = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const el = textareaRef.current;
-    if (!el) return;
-    const startY = e.clientY;
-    const startHeight = el.offsetHeight;
-    const onMove = (ev: MouseEvent) => {
-      const next = clampMessageHeight(startHeight + (startY - ev.clientY));
-      setMessageHeight(next);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      const height = textareaRef.current?.offsetHeight;
-      if (height) {
-        try { localStorage.setItem(MESSAGE_HEIGHT_KEY, String(clampMessageHeight(height))); } catch { /* private mode */ }
-      }
-    };
-    document.body.style.cursor = 'ns-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
-
-  const resetMessageHeight = () => {
-    setMessageHeight(null);
-    try { localStorage.removeItem(MESSAGE_HEIGHT_KEY); } catch { /* private mode */ }
-  };
-
-  useEffect(() => {
-    const id = 'gs-textarea-pulse-kf';
-    let s = document.getElementById(id) as HTMLStyleElement | null;
-    if (!s) {
-      s = document.createElement('style');
-      s.id = id;
-      document.head.appendChild(s);
-    }
-    s.textContent = `
-      @keyframes gs-textarea-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 0.35; } }
-    `;
-  }, []);
 
   // When the Stash/Shelve button is hidden for lack of space, its two actions move into the
   // Commit button's own dropdown instead, above the Commit/Commit & Push entries, so they stay reachable.
@@ -572,25 +477,11 @@ export function UnifiedCommitForm({
         </div>
       )}
 
-      {/* Message textarea. It grows with the text until the grip above it is dragged. */}
-      <div>
-        <div
-          className="gs-message-resize"
-          style={styles.resizeHandle}
-          onMouseDown={onResizeMessage}
-          onDoubleClick={resetMessageHeight}
-          title={l10n.t('Drag to resize the commit message. Double-click to fit the text.')}
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label={l10n.t('Resize commit message')}
-        >
-          <span className="gs-message-resize-grip" style={styles.resizeGrip} />
-        </div>
-      <div style={styles.textareaWrap}>
+      <div style={styles.messagePane}>
         <textarea
           ref={textareaRef}
           className="gs-commit-textarea"
-          style={styles.textarea(textareaFocused, messageHeight)}
+          style={styles.textarea(textareaFocused)}
           value={message}
           onChange={(e) => onMessageChange(e.target.value)}
           onFocus={() => setTextareaFocused(true)}
@@ -607,7 +498,6 @@ export function UnifiedCommitForm({
             }
           }}
         />
-      </div>
       </div>
       {(() => {
         const subjectLength = [...message.split('\n')[0]].length;
@@ -740,17 +630,21 @@ export function UnifiedCommitForm({
 const styles = {
   subjectWarning: {
     display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 2px 0', fontSize: '11px',
-    color: 'var(--vscode-editorWarning-foreground, #cca700)',
+    color: 'var(--vscode-editorWarning-foreground, #cca700)', flexShrink: 0,
   } as React.CSSProperties,
   container: {
     display: 'flex',
     flexDirection: 'column' as const,
+    flex: 1,
     gap: '6px',
     padding: '8px',
     borderTop: '1px solid var(--vscode-panel-border)',
     background: 'var(--vscode-sideBar-background)',
     minWidth: 0,
+    minHeight: 0,
+    height: '100%',
     overflow: 'hidden',
+    boxSizing: 'border-box' as const,
   },
   targets: {
     display: 'flex',
@@ -758,6 +652,7 @@ const styles = {
     gap: '4px',
     minHeight: '20px',
     minWidth: 0,
+    flexShrink: 0,
   },
   noTargets: {
     fontSize: '11px',
@@ -810,30 +705,18 @@ const styles = {
     width: '12px',
     height: '12px',
   }),
-  resizeHandle: {
-    height: '8px',
-    margin: '-4px 0 0',
-    cursor: 'ns-resize',
+  messagePane: {
+    flex: 1,
+    minHeight: 0,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
   } as React.CSSProperties,
-  resizeGrip: {
-    width: '28px',
-    height: '2px',
-    borderRadius: '1px',
-    background: 'var(--vscode-scrollbarSlider-background, rgba(128,128,128,0.45))',
-  } as React.CSSProperties,
-  textareaWrap: {
-    position: 'relative' as const,
-  },
-  textarea: (focused: boolean, height: number | null): React.CSSProperties => ({
+  textarea: (focused: boolean): React.CSSProperties => ({
+    flex: 1,
     width: '100%',
+    height: '100%',
+    minHeight: 0,
     resize: 'none' as const,
-    overflow: height != null ? 'auto' : 'hidden',
-    minHeight: `${MIN_MESSAGE_HEIGHT}px`,
-    ...(height != null ? { height: `${height}px` } : {}),
+    overflow: 'auto',
     background: 'var(--vscode-input-background)',
     color: 'var(--vscode-input-foreground)',
     border: focused
@@ -876,6 +759,7 @@ const styles = {
   actionsRow: {
     display: 'flex',
     alignItems: 'center',
+    flexShrink: 0,
     gap: '6px',
   },
   // Off-screen width probe for the Stash-button-collapse check (see stashButtonCollapsed) —
@@ -936,6 +820,7 @@ const styles = {
   amendLabel: {
     display: 'flex',
     alignItems: 'center',
+    flexShrink: 0,
     fontSize: '11px',
     cursor: 'pointer',
     color: 'var(--vscode-foreground)',
@@ -945,6 +830,7 @@ const styles = {
   profileBar: {
     display: 'flex',
     alignItems: 'center',
+    flexShrink: 0,
     gap: '4px',
     fontSize: '11px',
     color: 'var(--vscode-foreground)',

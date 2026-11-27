@@ -1,24 +1,30 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface Props {
   onMouseDown: (e: React.MouseEvent) => void;
+  /** 'x' changes the width of the neighbouring flex items, 'y' their height. */
+  axis?: 'x' | 'y';
+  style?: React.CSSProperties;
 }
 
-export function ResizeHandle({ onMouseDown }: Props) {
+/** The edge between two flex items. Dragging it changes their width or height. */
+export function ResizeHandle({ onMouseDown, axis = 'x', style }: Props) {
+  const [hot, setHot] = useState(false);
+  const vertical = axis === 'y';
   return (
     <div
       onMouseDown={onMouseDown}
+      onMouseEnter={() => setHot(true)}
+      onMouseLeave={() => setHot(false)}
+      role="separator"
+      aria-orientation={vertical ? 'horizontal' : 'vertical'}
       style={{
-        width: '4px',
-        flexShrink: 0,
-        cursor: 'col-resize',
-        background: 'transparent',
-        position: 'relative',
+        flex: '0 0 4px',
+        cursor: vertical ? 'row-resize' : 'col-resize',
+        background: hot ? 'var(--vscode-focusBorder)' : 'transparent',
         zIndex: 10,
-        transition: 'background 0.15s',
+        ...style,
       }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--vscode-focusBorder)'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
     />
   );
 }
